@@ -463,8 +463,8 @@ static int get_pixel_format(AVCodecContext *avctx)
      */
     if (!avctx->hwaccel) {
         av_log(avctx, AV_LOG_ERROR, "Your platform doesn't suppport"
-               " hardware accelerated AV1 decoding.\n");
-        return AVERROR(ENOSYS);
+               " hardware accelerated AV1 decoding. treas as no error\n");
+        // return AVERROR(ENOSYS); // gregory
     }
 
     avctx->pix_fmt = ret;
