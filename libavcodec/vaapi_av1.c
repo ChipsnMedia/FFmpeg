@@ -180,6 +180,31 @@ static int vaapi_av1_start_frame(AVCodecContext *avctx,
             .using_qmatrix = frame_header->using_qmatrix,
         }
     };
+    //+gregory add
+    pic_param.y_dc_delta_q    = frame_header->delta_q_y_dc;
+    pic_param.u_dc_delta_q    = frame_header->delta_q_u_dc;
+    pic_param.v_dc_delta_q    = frame_header->delta_q_v_dc;
+    pic_param.u_ac_delta_q    = frame_header->delta_q_u_ac;
+    pic_param.v_ac_delta_q    = frame_header->delta_q_v_ac;
+    pic_param.mode_control_fields.bits.delta_lf_multi = frame_header->delta_lf_multi;
+    pic_param.qmatrix_fields.bits.qm_y = frame_header->qm_y;
+    pic_param.qmatrix_fields.bits.qm_u = frame_header->qm_u;
+    pic_param.qmatrix_fields.bits.qm_v = frame_header->qm_v;
+    pic_param.matrix_coefficients = seq->color_config.matrix_coefficients;
+    if (frame_header->use_superres == 0)
+        pic_param.superres_scale_denominator = AV1_SUPERRES_NUM;
+    else
+        pic_param.superres_scale_denominator = frame_header->coded_denom;
+    pic_param.mode_control_fields.bits.log2_delta_lf_res = frame_header->delta_lf_res;
+    pic_param.mode_control_fields.bits.delta_lf_present_flag = frame_header->delta_lf_present;
+    pic_param.mode_control_fields.bits.delta_lf_multi = frame_header->delta_lf_multi;
+    //++the below parameters are not meaningfull for wave5 because wave5 dosesn't support large scale tile run
+    // pic_param.anchor_frames_num = 0;
+    // pic_param.tile_count_minus_1 = 0;
+    // pic_param.output_frame_width_in_tiles_minus_1 = 0;
+    // pic_param.output_frame_height_in_tiles_minus_1 = 0;
+    //-gregory add
+
 
     for (int i = 0; i < AV1_NUM_REF_FRAMES; i++) {
         if (pic_param.pic_info_fields.bits.frame_type == AV1_FRAME_KEY)
