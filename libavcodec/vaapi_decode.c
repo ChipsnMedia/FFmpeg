@@ -172,8 +172,14 @@ int ff_vaapi_decode_issue(AVCodecContext *avctx,
     if (vas != VA_STATUS_SUCCESS) {
         av_log(avctx, AV_LOG_ERROR, "Failed to upload decode "
                "parameters: %d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        goto fail_with_picture;
+        //gregory
+        if (avctx->codec_id == AV_CODEC_ID_AV1) {
+            av_log(avctx, AV_LOG_ERROR, "av1 decoder not to treat as an error \n");
+        }
+        else {
+            err = AVERROR(EIO);
+            goto fail_with_picture;
+        }
     }
 
     vas = vaRenderPicture(ctx->hwctx->display, ctx->va_context,
@@ -181,20 +187,32 @@ int ff_vaapi_decode_issue(AVCodecContext *avctx,
     if (vas != VA_STATUS_SUCCESS) {
         av_log(avctx, AV_LOG_ERROR, "Failed to upload slices: "
                "%d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        goto fail_with_picture;
+        //gregory
+        if (avctx->codec_id == AV_CODEC_ID_AV1) {
+            av_log(avctx, AV_LOG_ERROR, "av1 decoder not to treat as an error \n");
+        }
+        else {
+            err = AVERROR(EIO);
+            goto fail_with_picture;
+        }
     }
 
     vas = vaEndPicture(ctx->hwctx->display, ctx->va_context);
     if (vas != VA_STATUS_SUCCESS) {
         av_log(avctx, AV_LOG_ERROR, "Failed to end picture decode "
                "issue: %d (%s).\n", vas, vaErrorStr(vas));
-        err = AVERROR(EIO);
-        if (CONFIG_VAAPI_1 || ctx->hwctx->driver_quirks &
-            AV_VAAPI_DRIVER_QUIRK_RENDER_PARAM_BUFFERS)
-            goto fail;
-        else
-            goto fail_at_end;
+        //gregory
+        if (avctx->codec_id == AV_CODEC_ID_AV1) {
+            av_log(avctx, AV_LOG_ERROR, "av1 decoder not to treat as an error \n");
+        }
+        else {
+            err = AVERROR(EIO);
+            if (CONFIG_VAAPI_1 || ctx->hwctx->driver_quirks &
+                AV_VAAPI_DRIVER_QUIRK_RENDER_PARAM_BUFFERS)
+                goto fail;
+            else
+                goto fail_at_end;
+        }
     }
 
     if (CONFIG_VAAPI_1 || ctx->hwctx->driver_quirks &
