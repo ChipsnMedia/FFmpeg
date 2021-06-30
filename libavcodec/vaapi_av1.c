@@ -194,15 +194,17 @@ static int vaapi_av1_start_frame(AVCodecContext *avctx,
     if (frame_header->use_superres == 0)
         pic_param.superres_scale_denominator = AV1_SUPERRES_NUM;
     else
-        pic_param.superres_scale_denominator = frame_header->coded_denom;
+        pic_param.superres_scale_denominator = frame_header->coded_denom + AV1_SUPERRES_DENOM_MIN;
     pic_param.mode_control_fields.bits.log2_delta_lf_res = frame_header->delta_lf_res;
     pic_param.mode_control_fields.bits.delta_lf_present_flag = frame_header->delta_lf_present;
     pic_param.mode_control_fields.bits.delta_lf_multi = frame_header->delta_lf_multi;
-    //++the below parameters are not meaningfull for wave5 because wave5 dosesn't support large scale tile run
-    // pic_param.anchor_frames_num = 0;
-    // pic_param.tile_count_minus_1 = 0;
-    // pic_param.output_frame_width_in_tiles_minus_1 = 0;
-    // pic_param.output_frame_height_in_tiles_minus_1 = 0;
+
+    for (int i = 0; i < AV1_MAX_SEGMENTS; i++) {
+        for (int j = 0; j < AV1_SEG_LVL_MAX; j++) {
+            pic_param.seg_info.feature_mask[i] |= frame_header->feature_enabled[i][j] << j; 
+            pic_param.seg_info.feature_data[i][j]  = frame_header->feature_value[i][j];
+        }
+    }
     //-gregory add
 
 
@@ -300,7 +302,15 @@ static int vaapi_av1_decode_slice(AVCodecContext *avctx,
     VAAPIDecodePicture *pic = s->cur_frame.hwaccel_picture_private;
     VASliceParameterBufferAV1 slice_param;
     int err = 0;
+    //+ gregory add
+    const uint8_t *tg_slice_buffer_ptr;
+    uint32_t tg_slice_bufer_size;
+    uint32_t tg_slice_buffer_offset;
+    uint32_t tile_offset_size;
+    uint32_t tmp_size = 0;
 
+    //- gregory add
+    tg_slice_buffer_offset = 0;
     for (int i = s->tg_start; i <= s->tg_end; i++) {
         memset(&slice_param, 0, sizeof(VASliceParameterBufferAV1));
 
@@ -313,11 +323,25 @@ static int vaapi_av1_decode_slice(AVCodecContext *avctx,
             .tg_start          = s->tg_start,
             .tg_end            = s->tg_end,
         };
-
+        // + gregory add
+        tg_slice_buffer_ptr = (buffer + tg_slice_buffer_offset);
+        tile_offset_size = (s->tile_group_info[i].tile_offset - (uint32_t)(tg_slice_buffer_ptr-buffer));
+        tg_slice_bufer_size = s->tile_group_info[i].tile_size + tile_offset_size;
+        tmp_size += tg_slice_bufer_size;
+        tg_slice_buffer_offset += (tg_slice_bufer_size);
+        
         err = ff_vaapi_decode_make_slice_buffer(avctx, pic, &slice_param,
                                                 sizeof(VASliceParameterBufferAV1),
-                                                buffer,
-                                                size);
+                                                tg_slice_buffer_ptr,
+                                                tg_slice_bufer_size);
+        // - gregory add
+
+        // + gregory remove                                        
+        // err = ff_vaapi_decode_make_slice_buffer(avctx, pic, &slice_param,
+        //                                         sizeof(VASliceParameterBufferAV1),
+        //                                         buffer,
+        //                                         size);
+        // - gregoy remove
         if (err) {
             ff_vaapi_decode_cancel(avctx, pic);
             return err;
