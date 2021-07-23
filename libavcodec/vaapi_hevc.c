@@ -437,6 +437,9 @@ static int vaapi_hevc_decode_slice(AVCodecContext *avctx,
         .five_minus_max_num_merge_cand = sh->slice_type == HEVC_SLICE_I ? 0 : 5 - sh->max_num_merge_cand,
         .num_ref_idx_l0_active_minus1  = sh->nb_refs[L0] ? sh->nb_refs[L0] - 1 : 0,
         .num_ref_idx_l1_active_minus1  = sh->nb_refs[L1] ? sh->nb_refs[L1] - 1 : 0,
+        //+gregory add
+        .num_entry_point_offsets  = sh->num_entry_point_offsets,
+        //-gregory add
 
         .LongSliceFlags.fields = {
             .dependent_slice_segment_flag                 = sh->dependent_slice_segment_flag,
