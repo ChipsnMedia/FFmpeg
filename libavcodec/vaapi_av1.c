@@ -219,9 +219,19 @@ static int vaapi_av1_start_frame(AVCodecContext *avctx,
     }
     for (int i = 0; i < AV1_TOTAL_REFS_PER_FRAME; i++) {
         pic_param.ref_deltas[i] = frame_header->loop_filter_ref_deltas[i];
+    //+gregory add 2010-09-28
+        if (frame_header->update_ref_delta[i] == 0) { // indicate that data of ref_deltas[i] is not valid value.
+            pic_param.ref_deltas[i] = 127; // indicates that decoder shouldn't refer a value in this array.
+        }
+    //-gregory add
     }
     for (int i = 0; i < 2; i++) {
         pic_param.mode_deltas[i] = frame_header->loop_filter_mode_deltas[i];
+    //+gregory add 2010-09-28
+        if (frame_header->update_mode_delta[i] == 0) { // indicate that data of ref_deltas[i] is not valid value.
+            pic_param.mode_deltas[i] = 127; // indicates that decoder shouldn't refer a value in this array.
+        }
+    //-gregory add
     }
     for (int i = 0; i < (1 << frame_header->cdef_bits); i++) {
         pic_param.cdef_y_strengths[i] =
