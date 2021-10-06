@@ -378,7 +378,7 @@ static int FUNC(set_frame_refs)(CodedBitstreamContext *ctx, RWContext *rw,
         shifted_order_hints[i] = cur_frame_hint +
                                  cbs_av1_get_relative_dist(seq, priv->ref[i].order_hint,
                                                            priv->order_hint);
-        printf("%s cur_frame_hint=%d, shifted_order_hints[%d]=%d \n", __FUNCTION__,  cur_frame_hint, i, shifted_order_hints[i]);
+        // printf("%s cur_frame_hint=%d, shifted_order_hints[%d]=%d \n", __FUNCTION__,  cur_frame_hint, i, shifted_order_hints[i]);
     }
 
     latest_order_hint = shifted_order_hints[current->last_frame_idx];
@@ -395,7 +395,6 @@ static int FUNC(set_frame_refs)(CodedBitstreamContext *ctx, RWContext *rw,
     }
     if (ref >= 0) {
         ref_frame_idx[AV1_REF_FRAME_ALTREF - AV1_REF_FRAME_LAST] = ref;
-        printf("%s ref_frame_idx[AV1_REF_FRAME_ALTREF - AV1_REF_FRAME_LAST]=%d \n", __FUNCTION__,  ref);
         used_frame[ref] = 1;
     }
 
@@ -433,8 +432,6 @@ static int FUNC(set_frame_refs)(CodedBitstreamContext *ctx, RWContext *rw,
             ref = -1;
             for (j = 0; j < AV1_NUM_REF_FRAMES; j++) {
                 int hint = shifted_order_hints[j];
-                if (ref_frame - AV1_REF_FRAME_LAST == 6)
-                    printf("%s ref i=%d, j=%d, hint=%d, used_frame=%d, cur_frame_hint=%d, latest_order_hint=%d \n", __FUNCTION__,  i, j, hint, used_frame[j], cur_frame_hint, latest_order_hint );
                 if (!used_frame[j] && hint < cur_frame_hint &&
                     (ref < 0 || hint >= latest_order_hint)) {
                     ref = j;
@@ -444,8 +441,6 @@ static int FUNC(set_frame_refs)(CodedBitstreamContext *ctx, RWContext *rw,
             if (ref >= 0) {
                 ref_frame_idx[ref_frame - AV1_REF_FRAME_LAST] = ref;
                 used_frame[ref] = 1;
-                if (ref_frame - AV1_REF_FRAME_LAST == 6)
-                printf("%s i=%d, ref_frame_idx[ref_frame=%d - AV1_REF_FRAME_LAST]=%d \n", __FUNCTION__,  i, ref_frame, ref_frame_idx[6]);
             }
         }
     }
@@ -459,14 +454,10 @@ static int FUNC(set_frame_refs)(CodedBitstreamContext *ctx, RWContext *rw,
         }
     }
     for (i = 0; i < AV1_REFS_PER_FRAME; i++) {
-        printf("%s bf. ref_frame_idx[%d]=%d \n", __FUNCTION__, i, ref_frame_idx[i]);
         if (ref_frame_idx[i] < 0)
             ref_frame_idx[i] = ref;
         infer(ref_frame_idx[i], ref_frame_idx[i]);
-        printf("%s af. ref_frame_idx[%d]=%d \n", __FUNCTION__, i, current->ref_frame_idx[i]);
     }
-    printf(">>>> frame_presentation_time=%d \n", current->frame_presentation_time);
-    printf(">>>> display_frame_id=%d \n\n", current->display_frame_id);
 
     return 0;
 }
@@ -1537,7 +1528,6 @@ static int FUNC(uncompressed_header)(CodedBitstreamContext *ctx, RWContext *rw,
             if (current->frame_refs_short_signaling) {
                 fb(3, last_frame_idx);
                 fb(3, golden_frame_idx);
-                printf("%s current->frame_refs_short_signaling=%d \n", __FUNCTION__, current->frame_refs_short_signaling);
                 CHECK(FUNC(set_frame_refs)(ctx, rw, current));
             }
         }
