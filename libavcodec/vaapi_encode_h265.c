@@ -421,17 +421,44 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
     // These have to come from the capabilities of the encoder.  We have no
     // way to query them, so just hardcode parameters which work on the Intel
     // driver.
-    // CTB size from 8x8 to 32x32.
+
+//+gregory 2021/10/18 remove the setting for intel encoder
+    // // CTB size from 8x8 to 32x32.
+    // sps->log2_min_luma_coding_block_size_minus3   = 0;
+    // sps->log2_diff_max_min_luma_coding_block_size = 2;
+    // // Transform size from 4x4 to 32x32.
+    // sps->log2_min_luma_transform_block_size_minus2   = 0;
+    // sps->log2_diff_max_min_luma_transform_block_size = 3;
+    // // Full transform hierarchy allowed (2-5).
+    // sps->max_transform_hierarchy_depth_inter = 3;
+    // sps->max_transform_hierarchy_depth_intra = 3;
+    // // AMP works.
+    // sps->amp_enabled_flag = 1;
+    // // SAO and temporal MVP do not work.
+    // sps->sample_adaptive_offset_enabled_flag = 0;
+    // sps->sps_temporal_mvp_enabled_flag       = 0;
+
+    // sps->pcm_enabled_flag = 0;
+
+    // // STRPSs should ideally be here rather than defined individually in
+    // // each slice, but the structure isn't completely fixed so for now
+    // // don't bother.
+    // sps->num_short_term_ref_pic_sets     = 0;
+    // sps->long_term_ref_pics_present_flag = 0;
+//-gregory
+
+//+gregory 2021/10/18 modify the setting for wave6 encoder
+    // CTB size from 8x8 to 64x64.
     sps->log2_min_luma_coding_block_size_minus3   = 0;
-    sps->log2_diff_max_min_luma_coding_block_size = 2;
+    sps->log2_diff_max_min_luma_coding_block_size = 3;
     // Transform size from 4x4 to 32x32.
     sps->log2_min_luma_transform_block_size_minus2   = 0;
     sps->log2_diff_max_min_luma_transform_block_size = 3;
-    // Full transform hierarchy allowed (2-5).
-    sps->max_transform_hierarchy_depth_inter = 3;
-    sps->max_transform_hierarchy_depth_intra = 3;
+    // Full transform hierarchy 
+    sps->max_transform_hierarchy_depth_inter = 0;
+    sps->max_transform_hierarchy_depth_intra = 0;
     // AMP works.
-    sps->amp_enabled_flag = 1;
+    sps->amp_enabled_flag = 0;
     // SAO and temporal MVP do not work.
     sps->sample_adaptive_offset_enabled_flag = 0;
     sps->sps_temporal_mvp_enabled_flag       = 0;
@@ -443,7 +470,7 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
     // don't bother.
     sps->num_short_term_ref_pic_sets     = 0;
     sps->long_term_ref_pics_present_flag = 0;
-
+//-gregory
     sps->vui_parameters_present_flag = 1;
 
     if (avctx->sample_aspect_ratio.num != 0 &&
@@ -528,7 +555,17 @@ static int vaapi_encode_h265_init_sequence_params(AVCodecContext *avctx)
     pps->init_qp_minus26 = priv->fixed_qp_idr - 26;
 
     pps->cu_qp_delta_enabled_flag = (ctx->va_rc_mode != VA_RC_CQP);
-    pps->diff_cu_qp_delta_depth   = 0;
+//+gregory 2021/10/18 remove the setting for intel encoder
+    // pps->diff_cu_qp_delta_depth   = 0;
+//-gregory 2021/10/18 
+//+gregory 2021/10/18 modify the setting for wave6 encoder
+    if (pps->cu_qp_delta_enabled_flag == 1) {
+        pps->diff_cu_qp_delta_depth   = 1;
+    }
+    else {
+       pps->diff_cu_qp_delta_depth   = 0;
+    }
+//-gregory 2021/10/18 
 
     if (ctx->tile_rows && ctx->tile_cols) {
         int uniform_spacing;
@@ -1194,7 +1231,12 @@ static av_cold int vaapi_encode_h265_init(AVCodecContext *avctx)
     ctx->surface_height = FFALIGN(avctx->height, 16);
 
     // CTU size is currently hard-coded to 32.
-    ctx->slice_block_width = ctx->slice_block_height = 32;
+//+gregory 2021/10/18 remove the setting for intel encoder
+    // ctx->slice_block_width = ctx->slice_block_height = 32;
+//-gregory
+//+gregory 2021/10/18 modify the setting for wave6 encoder
+    ctx->slice_block_width = ctx->slice_block_height = 64;
+//-gregory
 
     if (priv->qp > 0)
         ctx->explicit_qp = priv->qp;
