@@ -1047,6 +1047,9 @@ static int vaapi_encode_h265_init_slice_params(AVCodecContext *avctx,
     else
         sh->slice_qp_delta = priv->fixed_qp_idr - (pps->init_qp_minus26 + 26);
 
+//+gregory 2021/10/22 modify the setting for wave6 encoder
+    sh->five_minus_max_num_merge_cand = 3;
+//-gregory
 
     *vslice = (VAEncSliceParameterBufferHEVC) {
         .slice_segment_address = sh->slice_segment_address,
