@@ -268,3 +268,190 @@ void ff_prores_idct_12(int16_t *block, const int16_t *qmat)
         idctSparseCol_int16_12bit(block + i);
     }
 }
+//+clair add 2021-11-11
+#define BIT18_PREC
+#define MAX(a, b)       (((a) > (b)) ? (a) : (b))
+#define MIN(a, b)       (((a) < (b)) ? (a) : (b))
+#define CLIP255(a)      (MIN(255, MAX(0, (a))))
+
+static void idct1d(int out[], int in[])
+{
+	int i, j, tmp2, tmp3;
+	int X[20], acc[8];
+	int Ax[8], Bx[8], Cx[8], Dx[8], Ex[8], Fx[8], Gx[8];
+
+	for (i = 0; i < 8; i++) {
+		tmp2 = (in[i]<<2) + in[i];
+		tmp3 = (in[i]<<3) + in[i];
+		X[0] =  in[i]<<5;
+		for (j = 1; j < 19; j++)
+			X[j] = X[j - 1]>>1;
+		if ((i&1) == 0) {
+#ifdef BIT18_PREC
+			Ax[i] = (tmp2<<1) + (tmp2>>2) + X[9] + X[15];
+			Cx[i] = X[1] - (tmp2>>2) + X[10] + X[15] - X[18];
+			Fx[i] = X[3] + X[4] + X[8] - X[14];
+#else
+			Ax[i] = (tmp2<<1) + (tmp2>>2) + X[9];
+			Bx[i] = X[1] - (tmp2>>2) + X[10];
+			Cx[i] = X[3] + X[4] + X[8] - X[14];
+#endif
+		}
+		else {
+#ifdef BIT18_PREC
+			Bx[i] = X[1] - (tmp2>>4) + (tmp2>>10);
+			Dx[i] = X[2] + tmp2 + (tmp2>>4) - (tmp3>>10) - X[17];
+			Ex[i] = tmp3 - X[8] + X[11] - X[15] - X[16];
+			Gx[i] = X[4] + (tmp3>>3) - X[13] + X[17];
+#else
+			Dx[i] = X[1] - (tmp2>>4) + X[13];
+			Ex[i] = X[2] + tmp2 + (tmp2>>4) - X[12];
+			Fx[i] = tmp3 - X[8] + X[11];
+			Gx[i] = X[4] + (tmp3>>3) - X[13];
+#endif
+		}
+	}
+
+#ifdef BIT18_PREC
+	acc[0] = Ax[0] + Cx[2] + Ax[4] + Fx[6];
+	acc[1] = Ax[0] + Fx[2] - Ax[4] - Cx[6];
+	acc[2] = Ax[0] - Fx[2] - Ax[4] + Cx[6];
+	acc[3] = Ax[0] - Cx[2] + Ax[4] - Fx[6];
+
+	acc[4] = Bx[1] + Dx[3] + Ex[5] + Gx[7];
+	acc[5] = Dx[1] - Gx[3] - Bx[5] - Ex[7];
+	acc[6] = Ex[1] - Bx[3] + Gx[5] + Dx[7];
+	acc[7] = Gx[1] - Ex[3] + Dx[5] - Bx[7];
+#else
+	acc[0] = Ax[0] + Bx[2] + Ax[4] + Cx[6];
+	acc[1] = Ax[0] + Cx[2] - Ax[4] - Bx[6];
+	acc[2] = Ax[0] - Cx[2] - Ax[4] + Bx[6];
+	acc[3] = Ax[0] - Bx[2] + Ax[4] - Cx[6];
+
+	acc[4] = Dx[1] + Ex[3] + Fx[5] + Gx[7];
+	acc[5] = Ex[1] - Gx[3] - Dx[5] - Fx[7];
+	acc[6] = Fx[1] - Dx[3] + Gx[5] + Ex[7];
+	acc[7] = Gx[1] - Fx[3] + Ex[5] - Dx[7];
+#endif
+
+
+	out[0] = acc[0] + acc[4];
+	out[1] = acc[1] + acc[5];
+	out[2] = acc[2] + acc[6];
+	out[3] = acc[3] + acc[7];
+	out[4] = acc[3] - acc[7];
+	out[5] = acc[2] - acc[6];
+	out[6] = acc[1] - acc[5];
+	out[7] = acc[0] - acc[4];
+}
+
+static void IdctBlk(int16_t block[])
+{
+	int  xx[64];
+	int  yy[64];
+	int  temp;
+	int  i;
+	// IDCT ROW x 8
+	for (i=0; i<64; i++)
+#ifdef BIT18_PREC
+        xx[i] = block[i/8 + (i&7)*8] << 6;
+#else
+		xx[i] = block[i/8 + (i&7)*8] << 4;
+#endif
+
+	for (i=0; i<64; i+=8)
+		idct1d(yy + i, xx + i);
+
+	for (i=0; i<64; i++) {
+		temp = yy[i];
+		if (temp > 0 || (temp&0xf) != 0)
+			temp = (temp >> 5) + ((temp >> 4) & 1);
+		else
+			temp = (temp >> 5);
+
+#ifdef BIT18_PREC
+		if (temp < -131072)
+			yy[i] = -131072;
+		else if (temp > 131071)		// signed 2^18
+			yy[i] = 131071;
+#else
+		if (temp < -32768)
+			yy[i] = -32768;
+		else if (temp > 32767)		// signed 2^16
+			yy[i] = 32767;
+#endif
+		else
+			yy[i] = temp;
+	}
+
+	// IDCT COL x 8
+	for (i=0; i<64; i++)
+		xx[i] = yy[i/8 + (i&7)*8];
+
+	for (i=0; i<64; i+=8)
+		idct1d(yy + i, xx + i);
+
+	for (i=0; i<64; i++) {
+		temp = yy[i];
+#ifdef BIT18_PREC
+        if (temp > 0 || (temp& 0x3ff) != 0)
+            temp = (temp >> 11) + ((temp >> 10) & 1);
+        else
+            temp = (temp >> 11);
+#else
+		if (temp > 0 || (temp& 0xff) != 0)
+			temp = (temp >> 9) + ((temp >> 8) & 1);
+		else
+			temp = (temp >> 9);
+#endif
+
+		if (temp < -256)
+			block[i] = -256;
+		else if (temp > 255)
+			block[i] = 255;
+		else
+			block[i] = temp;
+	}
+}
+
+
+void cnm_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
+{
+	int  i;
+
+    IdctBlk(block);       
+    for (i = 0; i < 8; i++) {
+        dest[0] = CLIP255(block[0]+128);
+        dest[1] = CLIP255(block[1]+128);
+        dest[2] = CLIP255(block[2]+128);
+        dest[3] = CLIP255(block[3]+128);
+        dest[4] = CLIP255(block[4]+128);
+        dest[5] = CLIP255(block[5]+128);
+        dest[6] = CLIP255(block[6]+128);
+        dest[7] = CLIP255(block[7]+128);
+
+        dest += line_size;
+        block  += 8;
+    }
+}
+
+void cnm_idct_add(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
+{
+    int i;
+
+    IdctBlk(block);
+    for (i = 0; i < 8; i++) {
+        dest[0] = CLIP255(dest[0]+block[0]);
+        dest[1] = CLIP255(dest[1]+block[1]);
+        dest[2] = CLIP255(dest[2]+block[2]);
+        dest[3] = CLIP255(dest[3]+block[3]);
+        dest[4] = CLIP255(dest[4]+block[4]);
+        dest[5] = CLIP255(dest[5]+block[5]);
+        dest[6] = CLIP255(dest[6]+block[6]);
+        dest[7] = CLIP255(dest[7]+block[7]);
+
+        dest += line_size;
+        block  += 8;
+    }
+}
+//-clair add

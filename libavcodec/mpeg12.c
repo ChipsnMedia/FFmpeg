@@ -113,7 +113,14 @@ av_cold void ff_mpeg12_common_init(MpegEncContext *s)
 
 void ff_mpeg1_clean_buffers(MpegEncContext *s)
 {
-    s->last_dc[0] = 1 << (7 + s->intra_dc_precision);
+    //+clair remove 2021-11-11
+    //s->last_dc[0] = 1 << (7 + s->intra_dc_precision);
+    //-clair remove
+
+    //+clair add 2021-11-11
+    // [OKA-396] C&M IDCT reset value
+    s->last_dc[0] = 0;
+    //-clair add
     s->last_dc[1] = s->last_dc[0];
     s->last_dc[2] = s->last_dc[0];
     memset(s->last_mv, 0, sizeof(s->last_mv));

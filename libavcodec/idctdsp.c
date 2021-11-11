@@ -288,8 +288,16 @@ av_cold void ff_idctdsp_init(IDCTDSPContext *c, AVCodecContext *avctx)
 #endif /* CONFIG_FAANIDCT */
             } else { // accurate/default
                 /* Be sure FF_IDCT_NONE will select this one, since it uses FF_IDCT_PERM_NONE */
-                c->idct_put  = ff_simple_idct_put_int16_8bit;
-                c->idct_add  = ff_simple_idct_add_int16_8bit;
+                //+clair remove 2021-11-11
+                //c->idct_put  = ff_simple_idct_put_int16_8bit;
+                //c->idct_add  = ff_simple_idct_add_int16_8bit;
+                //-clair remove
+
+                //+clair add 2021-11-11
+                // C&M IDCT
+                c->idct_put  = cnm_idct_put;
+                c->idct_add  = cnm_idct_add;
+                //-clair add
                 c->idct      = ff_simple_idct_int16_8bit;
                 c->perm_type = FF_IDCT_PERM_NONE;
             }
