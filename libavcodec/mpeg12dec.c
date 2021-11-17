@@ -1317,6 +1317,10 @@ static int mpeg_decode_postinit(AVCodecContext *avctx)
         avctx->pix_fmt = mpeg_get_pixelformat(avctx);
         setup_hwaccel_for_pixfmt(avctx);
 
+        //+clair add 2021-11-11
+        avctx->idct_algo = FF_IDCT_CNM_MP2;
+        //-clair add
+
         /* Quantization matrices may need reordering
          * if DCT permutation is changed. */
         memcpy(old_permutation, s->idsp.idct_permutation, 64 * sizeof(uint8_t));

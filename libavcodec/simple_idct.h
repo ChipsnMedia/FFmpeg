@@ -35,8 +35,11 @@ void ff_simple_idct_put_int16_8bit(uint8_t *dest, ptrdiff_t line_size, int16_t *
 void ff_simple_idct_add_int16_8bit(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
 void ff_simple_idct_int16_8bit(int16_t *block);
 //+clair add 2021-11-11
-void cnm_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
+void cnm_mp2_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
+void cnm_mp4_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
+void cnm_divx_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
 void cnm_idct_add(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
+void cnm_divx_idct_add(uint8_t *dest, ptrdiff_t line_size, int16_t *block);
 //-clair add
 
 void ff_simple_idct_put_int16_10bit(uint8_t *dest, ptrdiff_t line_size, int16_t *block);

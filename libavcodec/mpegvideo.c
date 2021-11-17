@@ -1974,15 +1974,17 @@ void mpv_reconstruct_mb_internal(MpegEncContext *s, int16_t block[12][64],
             if(s->mbintra_table[mb_xy])
                 ff_clean_intra_table_entries(s);
         } else {
-            
-            s->last_dc[0] =
-            s->last_dc[1] =
-            //+clair remove 2021-11-11
-            //s->last_dc[2] = 128 << s->intra_dc_precision;
-            //-clair remove
-            //+clair add 2021-11-11
-            // [OKA-396] C&M IDCT reset value
-            s->last_dc[2] = 0;
+            //+clair add update 2021-11-11
+            if (s->avctx->idct_algo==FF_IDCT_CNM_MP2) {
+                s->last_dc[0] =
+                s->last_dc[1] =
+                s->last_dc[2] = 0;
+
+            } else {
+                s->last_dc[0] =
+                s->last_dc[1] =
+                s->last_dc[2] = 128 << s->intra_dc_precision;
+            }
             //-clair add
         }
     }

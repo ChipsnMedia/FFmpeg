@@ -273,6 +273,7 @@ void ff_prores_idct_12(int16_t *block, const int16_t *qmat)
 #define MAX(a, b)       (((a) > (b)) ? (a) : (b))
 #define MIN(a, b)       (((a) < (b)) ? (a) : (b))
 #define CLIP255(a)      (MIN(255, MAX(0, (a))))
+#define CLIP16(a)  ( ((a) < -32768) ? -32768 : ((a) > 32767 ? 32767 : (a)) )
 
 static void idct1d(int out[], int in[])
 {
@@ -414,8 +415,7 @@ static void IdctBlk(int16_t block[])
 	}
 }
 
-
-void cnm_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
+void cnm_mp2_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
 {
 	int  i;
 
@@ -429,6 +429,305 @@ void cnm_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
         dest[5] = CLIP255(block[5]+128);
         dest[6] = CLIP255(block[6]+128);
         dest[7] = CLIP255(block[7]+128);
+
+        dest += line_size;
+        block  += 8;
+    }
+}
+
+void cnm_mp4_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
+{
+	int  i;
+	
+    IdctBlk(block);       
+    for (i = 0; i < 8; i++) {
+        dest[0] = CLIP255(block[0]);
+        dest[1] = CLIP255(block[1]);
+        dest[2] = CLIP255(block[2]);
+        dest[3] = CLIP255(block[3]);
+        dest[4] = CLIP255(block[4]);
+        dest[5] = CLIP255(block[5]);
+        dest[6] = CLIP255(block[6]);
+        dest[7] = CLIP255(block[7]);
+
+        dest += line_size;
+        block  += 8;
+    }
+}
+
+static void InvDivxDct1d (short *out, short *in, int seq)
+{
+	int i, j;
+	int temp[8];
+    int acc[8];
+	int pat1x0, pat2x0, pat3x0, X0[16], pat1x1, pat2x1, pat3x1, X1[16];
+	int x0[4], x1[4];
+
+    int round;
+	int c1d[4], c2d[4], c3d[4], c4d[4], c5d[4], c6d[4], c7d[4];
+
+	x0[0] = in[4];
+	x0[1] = in[2];
+	x0[2] = in[6];
+	x0[3] = in[0];
+	x1[0] = in[3];
+	x1[1] = in[5];
+	x1[2] = in[1];
+	x1[3] = in[7];
+
+    //----------------------------------------
+    // Perform IDCT now.
+    //----------------------------------------
+	for (i = 0; i < 4; i++) {
+		pat1x0 = (x0[i]<<1) + x0[i];
+		pat2x0 = (x0[i]<<2) + x0[i];
+		pat3x0 = (x0[i]<<3) + x0[i];
+		pat1x1 = (x1[i]<<1) + x1[i];
+		pat2x1 = (x1[i]<<2) + x1[i];
+		pat3x1 = (x1[i]<<3) + x1[i];
+
+		X0[0] = (x0[i]);
+		X1[0] = (x1[i]);
+		for (j = 1; j < 16; j++) {
+			X0[j] = (X0[j-1]<<1);
+			X1[j] = (X1[j-1]<<1);
+		}
+		if (seq == 0 || seq == 4) {
+			round = (seq == 0) ? 0x10000 : 0x0000;
+
+				c6d[i] = X0[14] + (pat2x0<<10) - (pat1x0<<5)-X0[0];
+				c4d[i] = X0[14];
+				c2d[i] = X0[13] + (pat2x0<<7)  + X0[5] + pat1x0;
+
+				c7d[i] = X1[14] + (pat1x1<<11) + (pat1x1<<6) + pat2x1;
+				c5d[i] = X1[14] + (pat2x1<<9) + (pat2x1<<6) + X1[1];
+				c3d[i] = (pat1x1<<12) + (pat3x1<<6) + pat3x1;
+				c1d[i] = X1[12] + (pat1x1<<7) + (pat2x1<<3);
+
+		}
+		else if (seq == 1 || seq == 7) {
+			round = (seq == 1) ? 0x0e0d : 0x0200;
+
+				c6d[i] = X0[15] - (pat1x0<<10) - X0[2];
+				c4d[i] = X0[14] + (pat1x0<<11) + (pat1x0<<6) + pat2x0;
+				c2d[i] = (pat1x0<<12) + X0[3] + pat1x0;
+
+				c7d[i] = X1[15] - (pat2x1<<8) + X1[5] + X1[0];
+				c5d[i] = (pat1x1<<13) + X1[11] + (pat1x1<<5) + X1[1];
+				c3d[i] = X1[14] + (pat1x1<<9) - X1[6] - X1[0];
+				c1d[i] = (pat1x1<<11) + X1[7] - X1[1];
+
+		}
+		else if (seq == 2 || seq == 6) {
+			round = (seq == 2) ? 0x08d4 : 0x0200;
+
+				c6d[i] = (pat1x0<<13) + (pat1x0<<10) + (pat2x0<<6) + X0[0];
+				c4d[i] = X0[14] + (pat2x0<<10) - (pat1x0<<5) - X0[0];
+				c2d[i] = X0[13] + (pat1x0<<10) + (pat2x0<<6) + X0[0];
+
+				c7d[i] = X1[15] - (pat1x1<<10) - X1[2];
+				c5d[i] = (pat1x1<<13) + (pat3x1<<6) + (pat2x1<<2);
+				c3d[i] = X1[14] + (pat1x1<<7) + (pat1x1<<4) + pat1x1;
+				c1d[i] = (pat1x1<<11) - X1[8] + (pat3x1<<1);
+
+		}
+		else if (seq == 3 || seq == 5) {
+			round = (seq == 3) ? 0x04b3 : 0x0078;
+
+				c6d[i] = (pat1x0<<13) + (pat3x0<<6) + (pat2x0<<2);
+				c4d[i] = X0[14] + (pat2x0<<9) + (pat2x0<<6) + X0[1];
+				c2d[i] = (pat2x0<<11) + (pat2x0<<5) + X0[4] + (pat2x0<<1);
+
+				c7d[i] = (pat1x1<<13) + X1[11] + (pat1x1<<5) + X1[1];
+				c5d[i] = X1[14] + (pat1x1<<11) + X1[7] - X1[1];
+				c3d[i] = (pat2x1<<11) + (pat3x1<<9) + (pat3x1<<5) + X1[0];
+				c1d[i] = (pat2x1<<10) + (pat1x1<<6) + pat1x1;
+
+		}
+
+	}
+	
+	acc[0] = ( c4d[0] + c6d[1] + c2d[2] + c4d[3] );
+	acc[1] = (-c4d[0] + c2d[1] - c6d[2] + c4d[3] );
+	acc[2] = (-c4d[0] - c2d[1] + c6d[2] + c4d[3] );
+	acc[3] = (+c4d[0] - c6d[1] - c2d[2] + c4d[3] );
+
+	acc[4] = (+c5d[0] + c3d[1] + c7d[2] + c1d[3] );
+	acc[5] = (-c1d[0] - c7d[1] + c5d[2] - c3d[3] );
+	acc[6] = (-c7d[0] + c1d[1] + c3d[2] + c5d[3] );
+	acc[7] = (-c3d[0] + c5d[1] + c1d[2] - c7d[3] );
+
+
+	temp[0] = acc[0] + acc[4] + round;
+	temp[1] = acc[1] + acc[5] + round;
+	temp[2] = acc[2] + acc[6] + round;
+	temp[3] = acc[3] + acc[7] + round;
+
+	temp[4] = acc[3] - acc[7] + round;
+	temp[5] = acc[2] - acc[6] + round;
+	temp[6] = acc[1] - acc[5] + round;
+	temp[7] = acc[0] - acc[4] + round;
+
+
+	// Clipping
+	for (i=0; i<8; i++) {
+		temp[i] = (temp[i] >>11);
+		if ( temp[i] >= 0 )
+			out[i] = temp[i] <= 0x00007fff	? temp[i] : 0x00007fff;
+		else
+			out[i] = temp[i] >  0xffff8000	? temp[i] : 0xffff8000;
+	}
+
+}
+static void InvDivxDct2d (short *out, short *in)
+{
+	int i, j;
+    int pat2_1, pat2_2;
+	int temp[8];
+    int acc[32];
+	int pat1x0, pat2x0, X0[16], pat1x1, pat2x1, X1[16];
+	int x0[4], x1[4];
+
+	int c1d[4], c2d[4], c3d[4], c4d[4], c5d[4], c6d[4];
+	int t0d16, t0d18;
+
+	x0[0] = in[0];
+	x0[1] = in[3];
+	x0[2] = in[2];
+	x0[3] = in[1];
+	x1[0] = in[4];
+	x1[1] = in[5];
+	x1[2] = in[6];
+	x1[3] = in[7];
+
+    //----------------------------------------
+    // Perform IDCT now.
+    //----------------------------------------
+
+	for (i = 0; i < 4; i++) {
+		pat1x0 = (x0[i]<<1) + x0[i];
+		pat2x0 = (x0[i]<<2) + x0[i];
+		pat1x1 = (x1[i]<<1) + x1[i];
+		pat2x1 = (x1[i]<<2) + x1[i];
+
+		X0[0] = (x0[i]);
+		X1[0] = (x1[i]);
+		for (j = 1; j < 16; j++) {
+			X0[j] = (X0[j-1]<<1);
+			X1[j] = (X1[j-1]<<1);
+		}
+		c1d[i] = (((pat1x0<<12) + (pat2x0<<7) + (pat1x0<<5) + (pat1x0<<2))>>16);
+		c2d[i] = (((pat1x0<<13) + (pat2x0<<9) + (pat2x0<<1))>>16);
+		c3d[i] = ((-( (pat2x0<<12) + (pat2x0<<8) - X0[4] + X0[1] ))>>16);
+
+		c4d[i] = (((pat1x1<<12) + (pat2x1<<7) + (pat1x1<<5) + (pat1x1<<2))>>16);
+		c5d[i] = (((pat1x1<<13) + (pat2x1<<9) + (pat2x1<<1))>>16);
+		c6d[i] = ((-( (pat2x1<<12) + (pat2x1<<8) - X1[4] + X1[1] ))>>16);
+
+	}
+
+	acc[ 0] = CLIP16( x0[0] + x1[0]);
+	acc[ 2] = CLIP16( x0[0] - x1[0]);
+	acc[ 4] = CLIP16(c5d[2] + x0[2]);
+	acc[ 6] = CLIP16(c2d[2] - x1[2]);
+
+	acc[ 1] = CLIP16(c4d[3] + x0[3]);
+	acc[ 3] = CLIP16(c1d[3] - x1[3]);
+	acc[ 5] = CLIP16(c6d[1] + x0[1]);
+	acc[ 7] = CLIP16(c3d[1] + x0[1]);
+
+	acc[ 8] = CLIP16(acc[5] + x1[1]);
+	acc[ 9] = CLIP16(acc[7] - x1[1]);
+
+	acc[10] = CLIP16(acc[0] + acc[4]);
+	acc[12] = CLIP16(acc[0] - acc[4]);
+	acc[14] = CLIP16(acc[2] + acc[6]);
+	acc[16] = CLIP16(acc[2] - acc[6]);
+	
+	acc[11] = CLIP16(acc[1] + acc[8]);
+	acc[13] = CLIP16(acc[1] - acc[8]);
+	acc[15] = CLIP16(acc[3] + acc[9]);
+	acc[17] = CLIP16(acc[3] - acc[9]);
+
+	acc[18] = CLIP16(acc[13] + acc[15]);
+	pat2_1  = (acc[18]<<2) + acc[18];
+	t0d16   = (pat2_1<<12) + (pat2_1<<9) + (acc[18]<<7) + (acc[18]<<1);
+	acc[19] = (((t0d16) >>16) <<1);
+
+	acc[20] = CLIP16(acc[13] - acc[15]);
+	pat2_2  = (acc[20]<<2) + acc[20];
+	t0d18   = (pat2_2<<12) + (pat2_2<<9) + (acc[20]<<7) + (acc[20]<<1);
+	acc[21] = (((t0d18) >>16) <<1);
+
+
+	temp[0] = CLIP16( acc[10] + acc[11] );
+	temp[1] = CLIP16( acc[14] + acc[19] );
+	temp[2] = CLIP16( acc[16] + acc[21]	);
+	temp[3] = CLIP16( acc[12] + acc[17] );
+	temp[4] = CLIP16( acc[12] - acc[17]	);
+	temp[5] = CLIP16( acc[16] - acc[21] );
+	temp[6] = CLIP16( acc[14] - acc[19] );
+	temp[7] = CLIP16( acc[10] - acc[11] );
+
+	for(j=0; j<8; j++) out[j] = (short) (temp[j] >> 6);
+}
+
+static void idct_generic(short *block)
+{
+	short  xx[64], yy[64];
+	int  i;
+
+	for (i=0; i<64; i++)
+		xx[i] = block[i];
+
+	   for (i=0; i<64; i+=8)
+		InvDivxDct1d (yy+i, xx+i, i/8);
+
+	for (i=0; i<64; i++)
+		xx[i] = yy[(i%8)*8 + (i/8)];
+	
+	   for (i=0; i<64; i+=8)
+		InvDivxDct2d (yy+i, xx+i);
+
+	for (i=0; i<64; i++)
+		block[i] = (int) yy[(i%8)*8 + (i/8)];
+}
+
+void cnm_divx_idct_put(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
+{
+	int  i;
+
+    idct_generic(block);
+
+    for (i = 0; i < 8; i++) {
+        dest[0] = CLIP255(block[0]);
+        dest[1] = CLIP255(block[1]);
+        dest[2] = CLIP255(block[2]);
+        dest[3] = CLIP255(block[3]);
+        dest[4] = CLIP255(block[4]);
+        dest[5] = CLIP255(block[5]);
+        dest[6] = CLIP255(block[6]);
+        dest[7] = CLIP255(block[7]);
+
+        dest += line_size;
+        block  += 8;
+    }
+}
+void cnm_divx_idct_add(uint8_t *dest, ptrdiff_t line_size, int16_t *block)
+{
+    int i;
+
+    idct_generic(block);
+
+    for (i = 0; i < 8; i++) {
+        dest[0] = CLIP255(dest[0]+block[0]);
+        dest[1] = CLIP255(dest[1]+block[1]);
+        dest[2] = CLIP255(dest[2]+block[2]);
+        dest[3] = CLIP255(dest[3]+block[3]);
+        dest[4] = CLIP255(dest[4]+block[4]);
+        dest[5] = CLIP255(dest[5]+block[5]);
+        dest[6] = CLIP255(dest[6]+block[6]);
+        dest[7] = CLIP255(dest[7]+block[7]);
 
         dest += line_size;
         block  += 8;

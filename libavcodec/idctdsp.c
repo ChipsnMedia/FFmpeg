@@ -286,18 +286,27 @@ av_cold void ff_idctdsp_init(IDCTDSPContext *c, AVCodecContext *avctx)
                 c->idct      = ff_faanidct;
                 c->perm_type = FF_IDCT_PERM_NONE;
 #endif /* CONFIG_FAANIDCT */
+            //+clair add 2021-11-11
+            } else if (avctx->idct_algo == FF_IDCT_CNM_MP2) {
+                c->idct_put  = cnm_mp2_idct_put;
+                c->idct_add  = cnm_idct_add;
+                c->idct      = ff_simple_idct_int16_8bit;
+                c->perm_type = FF_IDCT_PERM_NONE;
+            } else if (avctx->idct_algo == FF_IDCT_CNM_MP4) {
+                c->idct_put  = cnm_mp4_idct_put;
+                c->idct_add  = cnm_idct_add;
+                c->idct      = ff_simple_idct_int16_8bit;
+                c->perm_type = FF_IDCT_PERM_NONE;    
+            } else if (avctx->idct_algo == FF_IDCT_CNM_DIVX) {
+                c->idct_put  = cnm_divx_idct_put;
+                c->idct_add  = cnm_divx_idct_add;
+                c->idct      = ff_simple_idct_int16_8bit;
+                c->perm_type = FF_IDCT_PERM_NONE;                    
+            //-clair add
             } else { // accurate/default
                 /* Be sure FF_IDCT_NONE will select this one, since it uses FF_IDCT_PERM_NONE */
-                //+clair remove 2021-11-11
-                //c->idct_put  = ff_simple_idct_put_int16_8bit;
-                //c->idct_add  = ff_simple_idct_add_int16_8bit;
-                //-clair remove
-
-                //+clair add 2021-11-11
-                // C&M IDCT
-                c->idct_put  = cnm_idct_put;
-                c->idct_add  = cnm_idct_add;
-                //-clair add
+                c->idct_put  = ff_simple_idct_put_int16_8bit;
+                c->idct_add  = ff_simple_idct_add_int16_8bit;
                 c->idct      = ff_simple_idct_int16_8bit;
                 c->perm_type = FF_IDCT_PERM_NONE;
             }
