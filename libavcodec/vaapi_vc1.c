@@ -378,6 +378,9 @@ static int vaapi_vc1_start_frame(AVCodecContext *avctx, av_unused const uint8_t 
         pic_param.forward_reference_picture = ff_vaapi_get_surface_id(s->last_picture.f);
         break;
     }
+//+gregory add 2021/12/29 to give res_rtm_flag flag to decoder
+    pic_param.va_reserved[0] = v->res_rtm_flag;
+//-gregory add
 
     err = ff_vaapi_decode_make_param_buffer(avctx, pic,
                                             VAPictureParameterBufferType,
