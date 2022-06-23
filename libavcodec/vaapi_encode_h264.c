@@ -497,6 +497,8 @@ static int vaapi_encode_h264_init_sequence_params(AVCodecContext *avctx)
         pps->entropy_coding_mode_flag = 0;
 
     pps->num_ref_idx_l0_default_active_minus1 = 0;
+    if (avctx->refs == 2)
+        pps->num_ref_idx_l0_default_active_minus1 = 1;
     pps->num_ref_idx_l1_default_active_minus1 = 0;
 
     pps->pic_init_qp_minus26 = priv->fixed_qp_idr - 26;
@@ -715,8 +717,8 @@ static int vaapi_encode_h264_init_picture_params(AVCodecContext *avctx,
     vpic->frame_num = hpic->frame_num;
 
     vpic->pic_fields.bits.idr_pic_flag       = (pic->type == PICTURE_TYPE_IDR);
-    vpic->pic_fields.bits.reference_pic_flag = (pic->type != PICTURE_TYPE_B);
-
+    //vpic->pic_fields.bits.reference_pic_flag = (pic->type != PICTURE_TYPE_B);
+    vpic->pic_fields.bits.reference_pic_flag = pic->is_reference;
     return 0;
 }
 
@@ -1027,11 +1029,27 @@ static int vaapi_encode_h264_init_slice_params(AVCodecContext *avctx,
                    pic->type == PICTURE_TYPE_B);
         vslice->RefPicList0[0] = vpic->ReferenceFrames[0];
     }
+
+    sh->num_ref_idx_l0_active_minus1 = 0;
+    vslice->num_ref_idx_l0_active_minus1 = 0;
     if (pic->nb_refs >= 2) {
         // Forward reference for B-frame.
-        av_assert0(pic->type == PICTURE_TYPE_B);
-        vslice->RefPicList1[0] = vpic->ReferenceFrames[1];
+        if(pic->type == PICTURE_TYPE_B)
+            vslice->RefPicList1[0] = vpic->ReferenceFrames[1];
+        else if (avctx->refs == 2 && pic->type == PICTURE_TYPE_P) {
+            vslice->RefPicList0[1] = vpic->ReferenceFrames[1];
+            sh->num_ref_idx_l0_active_minus1 = 1;
+            vslice->num_ref_idx_l0_active_minus1 = 1;
+        }
+        else {
+            av_assert0(0);
+        }
     }
+
+    if (avctx->refs == 2 && ((pic->type == PICTURE_TYPE_P && pic->nb_refs == 1) || pic->type == PICTURE_TYPE_B))
+        sh->num_ref_idx_active_override_flag = 1;
+    else
+        sh->num_ref_idx_active_override_flag = 0;
 
     vslice->slice_qp_delta = sh->slice_qp_delta;
 
