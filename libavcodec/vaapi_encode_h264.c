@@ -1116,6 +1116,9 @@ static av_cold int vaapi_encode_h264_configure(AVCodecContext *avctx)
 }
 
 static const VAAPIEncodeProfile vaapi_encode_h264_profiles[] = {
+// #ifdef VA_PROFILE_H264_HIGH_10
+//     { FF_PROFILE_H264_HIGH_10, 10, 3, 1, 1, VAProfileH264High10 },
+// #endif
     { FF_PROFILE_H264_HIGH, 8, 3, 1, 1, VAProfileH264High },
     { FF_PROFILE_H264_MAIN, 8, 3, 1, 1, VAProfileH264Main },
     { FF_PROFILE_H264_CONSTRAINED_BASELINE,

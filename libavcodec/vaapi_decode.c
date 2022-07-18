@@ -401,6 +401,9 @@ static const struct {
                            H264ConstrainedBaseline),
     MAP(H264,        H264_MAIN,       H264Main    ),
     MAP(H264,        H264_HIGH,       H264High    ),
+#ifdef VA_PROFILE_H264_HIGH_10
+    MAP(H264,        H264_HIGH_10,    H264High10  ),
+#endif
 #if VA_CHECK_VERSION(0, 37, 0)
     MAP(HEVC,        HEVC_MAIN,       HEVCMain    ),
     MAP(HEVC,        HEVC_MAIN_10,    HEVCMain10  ),
