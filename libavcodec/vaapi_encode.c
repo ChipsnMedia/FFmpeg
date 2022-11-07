@@ -1019,6 +1019,12 @@ static int vaapi_encode_pick_next(AVCodecContext *avctx,
         ctx->next_prev = pic;
     }
     ++ctx->next_prev->ref_count[0];
+    if (avctx->refs == 2 && pic->type == PICTURE_TYPE_P && pic->nb_refs != 0) {
+        VAAPIEncodePicture *ref_start = pic->refs[0];
+        if (ref_start->nb_refs != 0 && ref_start->refs[0] != NULL) {
+            vaapi_encode_add_ref(avctx, pic, ref_start->refs[0], 1, 0, 0);
+        }
+    }
     return 0;
 }
 
