@@ -234,7 +234,9 @@ static int vaapi_h264_start_frame(AVCodecContext          *avctx,
     VAPictureParameterBufferH264 pic_param;
     VAIQMatrixBufferH264 iq_matrix;
     int err;
-
+    //+gregory 2022/11/07 to make pic_init_qp_minus26 correctly
+    int qp_bd_offset = 6 * (sps->bit_depth_luma - 8);
+    //-gregory
     pic->output_surface = ff_vaapi_get_surface_id(h->cur_pic_ptr->f);
 
     pic_param = (VAPictureParameterBufferH264) {
@@ -256,8 +258,12 @@ static int vaapi_h264_start_frame(AVCodecContext          *avctx,
             .log2_max_pic_order_cnt_lsb_minus4      = sps->log2_max_poc_lsb - 4,
             .delta_pic_order_always_zero_flag       = sps->delta_pic_order_always_zero_flag,
         },
-        .pic_init_qp_minus26                        = pps->init_qp - 26,
-        .pic_init_qs_minus26                        = pps->init_qs - 26,
+        //+gregory 2022/11/07 to make pic_init_qp_minus26 correctly
+        .pic_init_qp_minus26                        = pps->init_qp - 26 - qp_bd_offset,
+        .pic_init_qs_minus26                        = pps->init_qs - 26 - qp_bd_offset,
+        // .pic_init_qp_minus26                        = pps->init_qp - 26,
+        // .pic_init_qs_minus26                        = pps->init_qs - 26,
+        //-gregory
         .chroma_qp_index_offset                     = pps->chroma_qp_index_offset[0],
         .second_chroma_qp_index_offset              = pps->chroma_qp_index_offset[1],
         .pic_fields.bits = {
