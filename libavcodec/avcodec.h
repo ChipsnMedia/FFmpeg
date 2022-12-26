@@ -1637,6 +1637,10 @@ typedef struct AVCodecContext {
 #define FF_PROFILE_KLVA_SYNC 0
 #define FF_PROFILE_KLVA_ASYNC 1
 
+#define FF_PROFILE_AVS2_PIC                         0x12
+#define FF_PROFILE_AVS2_MAIN                        0x20
+#define FF_PROFILE_AVS2_MAIN_10                     0x22
+
     /**
      * level
      * - encoding: Set by user.

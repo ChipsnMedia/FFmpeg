@@ -404,6 +404,10 @@ static const struct {
 #ifdef VA_PROFILE_H264_HIGH_10
     MAP(H264,        H264_HIGH_10,    H264High10  ),
 #endif
+#ifdef VA_PROFILE_AVS2_MAIN_10
+    MAP(AVS2,        AVS2_MAIN,       AVS2Main    ),
+    MAP(AVS2,        AVS2_MAIN_10,    AVS2Main10  ),
+#endif
 #if VA_CHECK_VERSION(0, 37, 0)
     MAP(HEVC,        HEVC_MAIN,       HEVCMain    ),
     MAP(HEVC,        HEVC_MAIN_10,    HEVCMain10  ),
@@ -598,6 +602,7 @@ static int vaapi_decode_make_config(AVCodecContext *avctx,
         switch (avctx->codec_id) {
         case AV_CODEC_ID_H264:
         case AV_CODEC_ID_HEVC:
+        case AV_CODEC_ID_AVS2:
             frames->initial_pool_size += 16;
             break;
         case AV_CODEC_ID_VP9:

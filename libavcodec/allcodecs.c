@@ -67,6 +67,7 @@ extern const AVCodec ff_bmv_video_decoder;
 extern const AVCodec ff_brender_pix_decoder;
 extern const AVCodec ff_c93_decoder;
 extern const AVCodec ff_cavs_decoder;
+extern const AVCodec ff_avs2_decoder;
 extern const AVCodec ff_cdgraphics_decoder;
 extern const AVCodec ff_cdtoons_decoder;
 extern const AVCodec ff_cdxl_decoder;

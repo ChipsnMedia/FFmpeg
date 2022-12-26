@@ -754,6 +754,7 @@ static void vaapi_unmap_frame(AVHWFramesContext *hwfc,
     }
 
     av_free(map);
+    av_log(hwfc, AV_LOG_DEBUG, "Unmap end surface %#x.\n", surface_id);
 }
 
 static int vaapi_map_frame(AVHWFramesContext *hwfc,

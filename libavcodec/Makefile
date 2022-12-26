@@ -252,6 +252,7 @@ OBJS-$(CONFIG_BRENDER_PIX_DECODER)     += brenderpix.o
 OBJS-$(CONFIG_C93_DECODER)             += c93.o
 OBJS-$(CONFIG_CAVS_DECODER)            += cavs.o cavsdec.o cavsdsp.o \
                                           cavsdata.o
+OBJS-$(CONFIG_AVS2_DECODER)            += avs2.o avs2dec.o avs2dec_headers.o
 OBJS-$(CONFIG_CCAPTION_DECODER)        += ccaption_dec.o ass.o
 OBJS-$(CONFIG_CDGRAPHICS_DECODER)      += cdgraphics.o
 OBJS-$(CONFIG_CDTOONS_DECODER)         += cdtoons.o
@@ -972,6 +973,7 @@ OBJS-$(CONFIG_VP9_NVDEC_HWACCEL)          += nvdec_vp9.o
 OBJS-$(CONFIG_VP9_VAAPI_HWACCEL)          += vaapi_vp9.o
 OBJS-$(CONFIG_VP9_VDPAU_HWACCEL)          += vdpau_vp9.o
 OBJS-$(CONFIG_VP8_QSV_HWACCEL)            += qsvdec.o
+OBJS-$(CONFIG_AVS2_VAAPI_HWACCEL)         += vaapi_avs2.o
 
 # libavformat dependencies
 OBJS-$(CONFIG_ISO_MEDIA)               += mpeg4audio.o mpegaudiodata.o

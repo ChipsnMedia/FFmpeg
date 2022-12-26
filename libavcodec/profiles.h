@@ -72,5 +72,5 @@ extern const AVProfile ff_sbc_profiles[];
 extern const AVProfile ff_prores_profiles[];
 extern const AVProfile ff_mjpeg_profiles[];
 extern const AVProfile ff_arib_caption_profiles[];
-
+extern const AVProfile ff_avs2_profiles[];
 #endif /* AVCODEC_PROFILES_H */

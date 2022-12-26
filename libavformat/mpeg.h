@@ -57,7 +57,7 @@
 #define STREAM_TYPE_VIDEO_H264      0x1b
 #define STREAM_TYPE_VIDEO_HEVC      0x24
 #define STREAM_TYPE_VIDEO_CAVS      0x42
-
+#define STREAM_TYPE_VIDEO_AVS2      0xd2
 #define STREAM_TYPE_AUDIO_AC3       0x81
 
 static const int lpcm_freq_tab[4] = { 48000, 96000, 44100, 32000 };
