@@ -408,6 +408,10 @@ static const struct {
     MAP(AVS2,        AVS2_MAIN,       AVS2Main    ),
     MAP(AVS2,        AVS2_MAIN_10,    AVS2Main10  ),
 #endif
+#ifdef VA_PROFILE_AVS_DEFINED
+    MAP(CAVS,        CAVS_JIZHUN,     AVSJizhun   ),
+    MAP(CAVS,        CAVS_GUANGDIAN,  AVSGuangdian),
+#endif
 #if VA_CHECK_VERSION(0, 37, 0)
     MAP(HEVC,        HEVC_MAIN,       HEVCMain    ),
     MAP(HEVC,        HEVC_MAIN_10,    HEVCMain10  ),

@@ -160,10 +160,14 @@ struct dec_2dvlc {
 typedef struct AVSFrame {
     AVFrame *f;
     int poc;
+
+    AVBufferRef   *hwaccel_priv_buf;
+    void          *hwaccel_picture_private;
 } AVSFrame;
 
 typedef struct AVSContext {
     AVCodecContext *avctx;
+    enum AVPixelFormat pix_fmt;
     BlockDSPContext bdsp;
     H264ChromaContext h264chroma;
     IDCTDSPContext idsp;
@@ -185,6 +189,28 @@ typedef struct AVSContext {
     int loop_filter_disable;
     int alpha_offset, beta_offset;
     int ref_flag;
+    /** \defgroup guangdian profile
+     * @{
+     */
+    int aec_flag;
+    int weight_quant_flag;
+    int chroma_quant_param_delta_cb;
+    int chroma_quant_param_delta_cr;
+    uint8_t wqm_8x8[64];
+    /**@}*/
+
+    /** \defgroup slice weighting
+     * FFmpeg don't support slice weighting natively, but maybe needed for HWaccel.
+     * @{
+     */
+    uint32_t slice_weight_pred_flag : 1;
+    uint32_t mb_weight_pred_flag    : 1;
+    uint8_t luma_scale[4];
+    int8_t luma_shift[4];
+    uint8_t chroma_scale[4];
+    int8_t chroma_shift[4];
+    /**@}*/
+
     int mbx, mby, mbidx; ///< macroblock coordinates
     int flags;         ///< availability flags of neighbouring macroblocks
     int stc;           ///< last start code
