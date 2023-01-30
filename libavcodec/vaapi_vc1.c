@@ -381,6 +381,9 @@ static int vaapi_vc1_start_frame(AVCodecContext *avctx, av_unused const uint8_t 
 //+gregory add 2021/12/29 to give res_rtm_flag flag to decoder
     pic_param.va_reserved[0] = v->res_rtm_flag;
 //-gregory add
+//+clair add 2023/01/26 to give postprocflag flag to decoder
+    pic_param.va_reserved[1] = v->postprocflag;
+//-clair add
 
     err = ff_vaapi_decode_make_param_buffer(avctx, pic,
                                             VAPictureParameterBufferType,
