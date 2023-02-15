@@ -1184,8 +1184,12 @@ static int decode_pic(AVSContext *h)
     h->qp_fixed = get_bits1(&h->gb);
     h->qp       = get_bits(&h->gb, 6);
     if (h->cur.f->pict_type == AV_PICTURE_TYPE_I) {
-        if (!h->progressive && !h->pic_structure)
-            skip_bits1(&h->gb);//what is this?
+        if (!h->progressive && !h->pic_structure) {
+            //+clair add 2023/02/15
+            //skip_bits1(&h->gb);//what is this?
+            h->skip_mode_flag      = get_bits1(&h->gb);
+            //+clair add
+        }
         skip_bits(&h->gb, 4);   //reserved bits
     } else {
         if (!(h->cur.f->pict_type == AV_PICTURE_TYPE_B && h->pic_structure == 1))
