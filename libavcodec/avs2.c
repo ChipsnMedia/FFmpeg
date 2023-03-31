@@ -195,7 +195,7 @@ int ff_avs2_get_pic_type(AVS2PicHeader *pic)
     } else {
         switch (pic->pic_coding_type)
         {
-        case AVS2_PCT_P: return pic->b_scene_pic ? AVS2_PIC_P : AVS2_PIC_S;
+        case AVS2_PCT_P: return pic->b_scene_pred ? AVS2_PIC_S : AVS2_PIC_P;
         case AVS2_PCT_B: return AVS2_PIC_B;
         case AVS2_PCT_F: return AVS2_PIC_F;
         default:         return AVS2_PIC_UNKNOWN;
