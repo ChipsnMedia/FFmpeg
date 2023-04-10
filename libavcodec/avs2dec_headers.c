@@ -157,9 +157,9 @@ static void ff_avs2_amend_alf_coeff(int8_t *dst, const int16_t *src)
  */
 static void ff_avs2_process_alf_param(int8_t (*coeff)[9], const AVS2AlfParam *alf) 
 {
-    int i, j, c;
+    int i, j, c = 0;
     int tab[16] = { 0 };
-
+    if(alf->b_enable[0]){
     // distance:[0,2,3,5] -> tab:[0,0, 1,1,1, 2,2,2,2,2, 3,3,3,3,3,3] 
     for (i = 1; i < alf->luma.n_filter; i++) {
         for (j = 0; j < alf->luma.region_distance[i]; j++) {
@@ -175,7 +175,9 @@ static void ff_avs2_process_alf_param(int8_t (*coeff)[9], const AVS2AlfParam *al
     for (i = 0; i < 16; i++) {
         ff_avs2_amend_alf_coeff(coeff[i], alf->luma.coeff[tab[i]]);
     }
+    }
     for (i = 0; i < 2; i++) {
+        if(alf->b_enable[i+1])
         ff_avs2_amend_alf_coeff(coeff[16 + i], alf->chroma[i].coeff);
     }
 }
