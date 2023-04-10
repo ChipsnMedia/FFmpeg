@@ -34,6 +34,87 @@
 #include "avs2dec.h"
 
 
+static const uint8_t avs2_wq_model88[4][64] = {
+    //   l a b c d h
+    //     0 1 2 3 4 5
+    {
+    // Mode 0
+    0,0,0,4,4,4,5,5,
+    0,0,3,3,3,3,5,5,
+    0,3,2,2,1,1,5,5,
+    4,3,2,2,1,5,5,5,
+    4,3,1,1,5,5,5,5,
+    4,3,1,5,5,5,5,5,
+    5,5,5,5,5,5,5,5,
+    5,5,5,5,5,5,5,5 },
+    {
+    // Mode 1
+    0,0,0,4,4,4,5,5,
+    0,0,4,4,4,4,5,5,
+    0,3,2,2,2,1,5,5,
+    3,3,2,2,1,5,5,5,
+    3,3,2,1,5,5,5,5,
+    3,3,1,5,5,5,5,5,
+    5,5,5,5,5,5,5,5,
+    5,5,5,5,5,5,5,5 },
+    {
+    // Mode 2
+    0,0,0,4,4,3,5,5,
+    0,0,4,4,3,2,5,5,
+    0,4,4,3,2,1,5,5,
+    4,4,3,2,1,5,5,5,
+    4,3,2,1,5,5,5,5,
+    3,2,1,5,5,5,5,5,
+    5,5,5,5,5,5,5,5,
+    5,5,5,5,5,5,5,5 },
+    {
+    // Mode 3
+    0,0,0,3,2,1,5,5,
+    0,0,4,3,2,1,5,5,
+    0,4,4,3,2,1,5,5,
+    3,3,3,3,2,5,5,5,
+    2,2,2,2,5,5,5,5,
+    1,1,1,5,5,5,5,5,
+    5,5,5,5,5,5,5,5,
+    5,5,5,5,5,5,5,5 }
+};
+
+static const uint8_t avs2_wq_model44[4][16] = {
+    //   l a b c d h
+    //     0 1 2 3 4 5
+    {
+    // Mode 0
+    0, 4, 3, 5,
+    4, 2, 1, 5,
+    3, 1, 1, 5,
+    5, 5, 5, 5 },
+    {
+    // Mode 1
+    0, 4, 4, 5,
+    3, 2, 2, 5,
+    3, 2, 1, 5,
+    5, 5, 5, 5 },
+    {
+    // Mode 2
+    0, 4, 3, 5,
+    4, 3, 2, 5,
+    3, 2, 1, 5,
+    5, 5, 5, 5 },
+    {
+    // Mode 3
+    0, 3, 1, 5,
+    3, 4, 2, 5,
+    1, 2, 2, 5,
+    5, 5, 5, 5 }
+};
+
+static const uint8_t avs2_default_wq_param[2][6]=
+{
+    { 67,71,71,80,80,106 },
+    { 64,49,53,58,58,64 }
+};
+
+
 static int ff_avs2_decode_rcs(GetBitContext* gb, AVS2RefCfgSet* rcs, void* logctx) {
     int j = 0;
     rcs->b_ref_by_others        = get_bits1(gb);
@@ -605,15 +686,28 @@ int ff_avs2_decode_pic_header(AVS2Context *h, uint32_t stc,
     if (pic->b_enable_pic_wq) {
         pic->wq_data_index = get_bits(gb, 2);
         if (pic->wq_data_index == 1) {
+            int8_t wq_param[6];
             skip_bits1(gb);
             pic->wq_param_index = get_bits(gb, 2);
             pic->wq_model = get_bits(gb, 2);
-            if (pic->wq_param_index == 1 || pic->wq_data_index == 2) {
+            if (pic->wq_param_index == 0){
+                for (i = 0; i < 6; i++) {
+                    wq_param[i] = avs2_default_wq_param[1][i];
+                }
+            }
+            else if (pic->wq_param_index == 1 || pic->wq_param_index == 2) {
                 int *wq_param_delta = pic->wq_param_delta[pic->wq_param_index - 1];
                 for (i = 0; i < 6; i++) {
                     wq_param_delta[i] = get_se_golomb(gb);
+                    wq_param[i] = wq_param_delta[i] + avs2_default_wq_param[pic->wq_param_index - 1][i];
                 }
             }
+            
+            for (i = 0; i < 64; i++) 
+                pic->wqm.m88[i] = wq_param[avs2_wq_model88[pic->wq_model][i]];
+            for (i = 0; i < 16; i++)
+                pic->wqm.m44[i] = wq_param[avs2_wq_model44[pic->wq_model][i]];
+            
         } else if (pic->wq_data_index == 2) {
             ff_avs2_decode_wqm(gb, &pic->wqm);
         }

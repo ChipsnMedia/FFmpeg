@@ -141,9 +141,14 @@ static int vaapi_avs2_start_frame(AVCodecContext          *avctx,
         }
         vaapi_avs2_fill_pic(&pic_param.ref_list[i], ref_frame);
     }
-
+    if(pic->wq_data_index == 0){
+        memcpy(pic_param.wq_mat, seq->wqm.m44, 16);
+        memcpy(pic_param.wq_mat + 16, seq->wqm.m88, 64);
+    }
+    else{
     memcpy(pic_param.wq_mat, pic->wqm.m44, 16);
     memcpy(pic_param.wq_mat + 16, pic->wqm.m88, 64);
+    }
     memcpy(pic_param.alf_coeff[0], pic->alf_coeff[0], sizeof(pic_param.alf_coeff));
 
     err = ff_vaapi_decode_make_param_buffer(avctx, vapic,
