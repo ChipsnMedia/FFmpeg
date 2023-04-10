@@ -170,7 +170,7 @@ static int ff_avs2_dpb_get_current_frame(AVS2Context *h)
         av_log(h, AV_LOG_ERROR, "Can't get unused frame buffer for decoding !!!\n");
         return AVERROR(ENOBUFS);
     }
-
+    
     h->curr_frame->dpb_marks |= AVS2_DPB_MARK_USED;
     memcpy(&h->curr_frame->pic_header, &h->pic, sizeof(AVS2PicHeader));
     h->curr_frame->pic_type = ff_avs2_get_pic_type(&h->pic);
@@ -229,16 +229,17 @@ static void ff_avs2_dpb_marks_update(AVS2Context *h)
     /**
      * mark unref pictures
      */
-    if (curr->pic_type == AVS2_PIC_G || curr->pic_type == AVS2_PIC_GB) {
-        for (i = 0; i < AVS2_MAX_DPB_COUNT; i++) {
-            iter = &h->DPB[i];
-            if (IS_DPB_FRAME_INUSE(iter)) {
-                if (iter->pic_type == AVS2_PIC_G || iter->pic_type == AVS2_PIC_GB) {
-                    iter->dpb_marks |= AVS2_DPB_MARK_UNREF;
-                }
-            }
-        }
-    }
+    // if (curr->pic_type == AVS2_PIC_G || curr->pic_type == AVS2_PIC_GB) {
+    //     for (i = 0; i < AVS2_MAX_DPB_COUNT; i++) {
+    //         iter = &h->DPB[i];
+    //         if (IS_DPB_FRAME_INUSE(iter)) {
+    //             if (iter->pic_type == AVS2_PIC_G || iter->pic_type == AVS2_PIC_GB) {
+    //                 iter->dpb_marks |= AVS2_DPB_MARK_UNREF;
+    //             }
+    //         }
+    //     }
+    // }
+    
     for (i = 0; i < rcs->n_rm; i++) {
         int rm_doi = pic->doi - rcs->rm_delta_doi[i];
         iter = ff_avs2_dpb_get_frame_by_doi(h, rm_doi);
@@ -251,9 +252,9 @@ static void ff_avs2_dpb_marks_update(AVS2Context *h)
             }
             continue;
         }
-        if (!h->seq.b_has_temporal_id || iter->pic_header.temporal_id > pic->temporal_id) {
+        //if (!h->seq.b_has_temporal_id || iter->pic_header.temporal_id > pic->temporal_id) {
             iter->dpb_marks |= AVS2_DPB_MARK_UNREF;
-        }        
+        //}        
     }
 
     /**
