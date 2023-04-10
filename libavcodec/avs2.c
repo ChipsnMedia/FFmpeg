@@ -222,7 +222,6 @@ const char* ff_avs2_get_pic_type_str(AVS2PicHeader *pic)
 
 int ff_avs2_packet_split(AVS2PacketSplit *pkt, const uint8_t *data, int size, void *logctx)
 {
-    uint32_t stc = -1;
     GetByteContext _bs, *bs=&_bs;
 
     av_log(logctx, AV_LOG_DEBUG, "+%s\n", __FUNCTION__);
@@ -231,6 +230,8 @@ int ff_avs2_packet_split(AVS2PacketSplit *pkt, const uint8_t *data, int size, vo
     memset(pkt, 0, sizeof(*pkt));
     while (bytestream2_get_bytes_left(bs) >= 4) {
         AVS2EsUnit *unit = 0;
+        int valid_slice = 0;
+        uint32_t stc = -1;
         bs->buffer = avpriv_find_start_code(bs->buffer, bs->buffer_end, &stc);
         if (bs->buffer < bs->buffer_end && (stc & 0xFFFFFF00) == 0x100) {
             if (!ff_avs2_valid_start_code(stc)) {
@@ -238,6 +239,8 @@ int ff_avs2_packet_split(AVS2PacketSplit *pkt, const uint8_t *data, int size, vo
                         stc, bytestream2_tell(bs));
                 return AVERROR_INVALIDDATA;
             }
+            
+            valid_slice = ff_avs2_valid_slice_stc(stc);
 
             if (pkt->nb_alloc < pkt->nb_units + 1) {
                 int new_space = pkt->nb_units + 4;
@@ -252,13 +255,16 @@ int ff_avs2_packet_split(AVS2PacketSplit *pkt, const uint8_t *data, int size, vo
             }
             
             unit = &pkt->units[pkt->nb_units];
+            if (valid_slice)
+                bytestream2_seek(bs, -1, SEEK_CUR);
+                
             unit->start_code = stc;
             unit->data_start = bytestream2_tell(bs);
             unit->data_len   = bytestream2_get_bytes_left(bs);
 
             // amend previous data_len
             if (pkt->nb_units > 0) {
-                unit[-1].data_len -= 4 + unit->data_len;
+                unit[-1].data_len -= 4 + unit->data_len - valid_slice;
             } 
 
             pkt->nb_units += 1;
@@ -294,4 +300,51 @@ void ff_avs2_packet_uninit(AVS2PacketSplit *pkt) {
     av_freep(&pkt->units);
     pkt->nb_units = 0;
     pkt->nb_alloc = 0;
+}
+
+int ff_avs2_remove_pseudo_code(uint8_t *dst, const uint8_t *src, int size)
+{
+    static const uint8_t BITMASK[] = { 0x00, 0x00, 0xc0, 0x00, 0xf0, 0x00, 0xfc, 0x00 };
+    int src_pos = 0;
+    int dst_pos = 0;
+    int cur_bit = 0;
+    int last_bit = 0;
+    
+    uint8_t cur_byte = 0;
+    uint8_t last_byte = 0;
+    
+    
+    while (src_pos < 2 && src_pos < size){
+        dst[dst_pos++] = src[src_pos++];
+    }
+    
+    while (src_pos < size){
+        cur_bit = 8;
+        if (src[src_pos-2] == 0 && src[src_pos-1] == 0 && src[src_pos] == 0x02)
+            cur_bit = 6;
+        cur_byte = src[src_pos++];
+        
+        if (cur_bit == 8) {
+            if (last_bit == 0) {
+                dst[dst_pos++] = cur_byte;
+            } else {
+                dst[dst_pos++] = ((last_byte & BITMASK[last_bit]) | ((cur_byte & BITMASK[8 - last_bit]) >> last_bit));
+                last_byte      = (cur_byte << (8 - last_bit)) & BITMASK[last_bit];
+            }
+        } else {
+            if (last_bit == 0) {
+                last_byte = cur_byte;
+                last_bit  = cur_bit;
+            } else {
+                dst[dst_pos++] = ((last_byte & BITMASK[last_bit]) | ((cur_byte & BITMASK[8 - last_bit]) >> last_bit));
+                last_byte = (cur_byte << (8 - last_bit)) & BITMASK[last_bit - 2];
+                last_bit  = last_bit - 2;
+            }
+        }
+    }
+    
+    if (last_bit != 0 && last_byte != 0) {
+        dst[dst_pos++] = last_byte;
+    }
+    return dst_pos; // dst size
 }

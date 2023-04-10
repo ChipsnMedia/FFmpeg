@@ -160,25 +160,25 @@ static void ff_avs2_process_alf_param(int8_t (*coeff)[9], const AVS2AlfParam *al
     int i, j, c = 0;
     int tab[16] = { 0 };
     if(alf->b_enable[0]){
-    // distance:[0,2,3,5] -> tab:[0,0, 1,1,1, 2,2,2,2,2, 3,3,3,3,3,3] 
-    for (i = 1; i < alf->luma.n_filter; i++) {
-        for (j = 0; j < alf->luma.region_distance[i]; j++) {
-            tab[c+1] = tab[c];
-            c += 1;
+        // distance:[0,2,3,5] -> tab:[0,0, 1,1,1, 2,2,2,2,2, 3,3,3,3,3,3] 
+        for (i = 1; i < alf->luma.n_filter; i++) {
+            for (j = 0; j < alf->luma.region_distance[i]; j++) {
+                tab[c+1] = tab[c];
+                c += 1;
+            }
+            tab[c] += 1;
         }
-        tab[c] += 1;
-    }
-    for (i = c; i < 16; i++) {
-        tab[i] = tab[c];
-    }
+        for (i = c; i < 16; i++) {
+            tab[i] = tab[c];
+        }
 
-    for (i = 0; i < 16; i++) {
-        ff_avs2_amend_alf_coeff(coeff[i], alf->luma.coeff[tab[i]]);
-    }
+        for (i = 0; i < 16; i++) {
+            ff_avs2_amend_alf_coeff(coeff[i], alf->luma.coeff[tab[i]]);
+        }
     }
     for (i = 0; i < 2; i++) {
         if(alf->b_enable[i+1])
-        ff_avs2_amend_alf_coeff(coeff[16 + i], alf->chroma[i].coeff);
+            ff_avs2_amend_alf_coeff(coeff[16 + i], alf->chroma[i].coeff);
     }
 }
 
@@ -585,10 +585,17 @@ int ff_avs2_decode_extradata(AVS2Context *h, const uint8_t *data, int size,
 int ff_avs2_decode_pic_header(AVS2Context *h, uint32_t stc, 
                               GetByteContext* bs, AVS2PicHeader *pic)
 {
-    int i, ret;
+    int i, ret, buf_size;
     AVS2SeqHeader *seq = &h->seq;
     GetBitContext _gb, *gb = &_gb;
-    init_get_bits8(gb, bs->buffer, bs->buffer_end - bs->buffer);
+    
+    uint8_t *rm_pseudo_buffer = av_mallocz(bs->buffer_end - bs->buffer_start);
+    if (!rm_pseudo_buffer)
+        goto error;
+    
+    buf_size = ff_avs2_remove_pseudo_code(rm_pseudo_buffer, bs->buffer, bs->buffer_end - bs->buffer_start);
+    
+    init_get_bits8(gb, rm_pseudo_buffer, buf_size);
 
     ff_avs2_set_default_pic_header(&h->seq, &h->pic, stc == AVS2_STC_INTRA_PIC);
     pic->bbv_delay = get_bits_long(gb, 32);
@@ -726,6 +733,8 @@ int ff_avs2_decode_pic_header(AVS2Context *h, uint32_t stc,
             ff_avs2_get_pic_type_str(&h->pic), h->pic.b_random_access,
             h->pic.temporal_id, h->pic.doi,
             ff_avs2_get_pic_poi(&h->seq, &h->pic));
+error:
+    av_free(rm_pseudo_buffer);
     return 0;
 }
 
@@ -735,9 +744,19 @@ int ff_avs2_decode_slice_header(AVS2Context *h, uint32_t stc, GetByteContext *bs
     AVS2PicHeader *pic = &h->pic;
     AVS2SlcHeader *slc = &h->slc;
     GetBitContext _gb, *gb = &_gb;
-    init_get_bits8(gb, bs->buffer, bs->buffer_end - bs->buffer_start);
+    
+    int const MAX_SLICE_HEADER_BYTES = 5;
+    int buf_size;
 
-    slc->lcu_y = stc & 0xff;
+    uint8_t *rm_pseudo_buffer = av_mallocz(MAX_SLICE_HEADER_BYTES);
+    if (!rm_pseudo_buffer)
+        goto error;
+
+    buf_size = ff_avs2_remove_pseudo_code(rm_pseudo_buffer, bs->buffer, MAX_SLICE_HEADER_BYTES);
+    
+    init_get_bits8(gb, rm_pseudo_buffer, buf_size);
+
+    slc->lcu_y = get_bits(gb, 8);
     if (seq->height > (144 << seq->log2_lcu_size)) {
         slc->lcu_y += get_bits(gb, 3) << 7 ;
     }
@@ -762,5 +781,8 @@ int ff_avs2_decode_slice_header(AVS2Context *h, uint32_t stc, GetByteContext *bs
     slc->aec_byte_offset = get_bits_count(gb) >> 3;
 
     av_log(h, AV_LOG_TRACE, "slice[%d, %d]\n", slc->lcu_x, slc->lcu_y);
+    
+error:
+    av_free(rm_pseudo_buffer);
     return 0;
 }

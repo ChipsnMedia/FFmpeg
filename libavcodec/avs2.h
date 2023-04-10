@@ -491,6 +491,8 @@ int ff_avs2_packet_split(AVS2PacketSplit *pkt, const uint8_t *data, int size, vo
  */
 void ff_avs2_packet_uninit(AVS2PacketSplit *pkt);
 
+int ff_avs2_remove_pseudo_code(uint8_t *dst, const uint8_t *src, int size);
+
 #define AVS2_CHECK_RET(ret) if (ret < 0) { \
     av_log(h, AV_LOG_ERROR, "AVS2_CHECK_RET(%d) at line:%d, file:%s\n", ret, __LINE__, __FILE__); \
     return ret; \
