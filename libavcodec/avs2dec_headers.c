@@ -260,11 +260,11 @@ int ff_avs2_decode_seq_header(AVS2Context *h, GetByteContext* bs, AVS2SeqHeader 
 
     /* sample_precision seems useless */
     if (seq->profile_id == AVS2_PROFILE_MAIN_10) {
-        seq->sample_bit_depth = 6 + (1 << get_bits(gb, 3));
-        seq->output_bit_depth = 6 + (1 << get_bits(gb, 3));
+        seq->output_bit_depth = 6 + (get_bits(gb, 3) << 1);
+        seq->sample_bit_depth = 6 + (get_bits(gb, 3) << 1);
     } else {
-        seq->sample_bit_depth = 6 + (1 << get_bits(gb, 3));
-        seq->output_bit_depth = 8;
+        seq->output_bit_depth = 6 + (get_bits(gb, 3) << 1);
+        seq->sample_bit_depth = 8;
     }
     if (seq->sample_bit_depth != 8 && seq->sample_bit_depth != 10) {
         av_log(h, AV_LOG_ERROR, "Invalid sample_precision : %d !!!\n", seq->sample_bit_depth);
@@ -274,7 +274,7 @@ int ff_avs2_decode_seq_header(AVS2Context *h, GetByteContext* bs, AVS2SeqHeader 
         av_log(h, AV_LOG_ERROR, "Invalid encoding_precision : %d !!!\n", seq->output_bit_depth);
         return AVERROR_INVALIDDATA;
     }
-    if (seq->output_bit_depth < seq->sample_bit_depth) {
+    if (seq->sample_bit_depth < seq->output_bit_depth) {
         av_log(h, AV_LOG_ERROR, "encoding_precision smaller than sample_precision !!!\n");
         return AVERROR_INVALIDDATA;
     }
