@@ -180,7 +180,7 @@ static int ff_avs2_dpb_get_current_frame(AVS2Context *h)
     h->curr_frame->b_ref = rcs->b_ref_by_others;
     h->curr_frame->n_ref = rcs->n_ref;
     for (i = 0; i < rcs->n_ref; i++) {
-        int ref_doi = pic->doi - rcs->ref_delta_doi[i];
+        uint8_t ref_doi = pic->doi - rcs->ref_delta_doi[i];
         AVS2Frame* ref_frame = ff_avs2_dpb_get_frame_by_doi(h, ref_doi);
         if (!ref_frame) {
             av_log(h, AV_LOG_ERROR, "Can't get ref frame with doi=%d in dpb, "
@@ -241,7 +241,7 @@ static void ff_avs2_dpb_marks_update(AVS2Context *h)
     // }
     
     for (i = 0; i < rcs->n_rm; i++) {
-        int rm_doi = pic->doi - rcs->rm_delta_doi[i];
+        uint8_t rm_doi = pic->doi - rcs->rm_delta_doi[i];
         iter = ff_avs2_dpb_get_frame_by_doi(h, rm_doi);
         if (!iter) {
             if (rcs->n_rm == 1 && rcs->rm_delta_doi[i] == 1) {
@@ -276,7 +276,7 @@ static void ff_avs2_dpb_marks_update(AVS2Context *h)
         iter = &h->DPB[i];
         if (IS_DPB_FRAME_UNUSED(iter) || iter->pic_type == AVS2_PIC_GB)
             continue;
-        if (iter->pic_header.doi + iter->pic_header.output_delay <= pic->doi) {
+        if ((uint8_t)(iter->pic_header.doi + iter->pic_header.output_delay) <= (uint8_t)pic->doi) {
             iter->dpb_marks |= AVS2_DPB_MARK_OUTPUTABLE;
         }
     }
