@@ -36,6 +36,9 @@ typedef struct VAAPIEncodeAV1Picture {
     int slot;
 } VAAPIEncodeAV1Picture;
 
+#define W6_AV1_LOG2_MAX_TILE_COLS 1
+#define W6_AV1_LOG2_MAX_TILE_ROWS 4
+
 const int qp_to_q_idx[2][52]= //8bit,10bit
 {
     {
@@ -103,6 +106,9 @@ typedef struct VAAPIEncodeAV1Context {
     int tile_cols_log2;
     int tile_rows_log2;
     int tile_groups;
+    
+    int max_tile_width_sb;
+    int max_tile_area_sb;
 } VAAPIEncodeAV1Context;
 
 static av_cold int vaapi_encode_av1_configure(AVCodecContext *avctx)
@@ -221,6 +227,8 @@ static int vaapi_encode_av1_write_frame_header(AVCodecContext *avctx,
     int start, payload_bits, obu_size, obu_size_len;
     int qindex_offset, loopfilter_offset;
     int cdef_start_offset, cdef_end_offset;
+    int max_tile_height_sb;
+    int max_width, max_height, widest_tile_sb, start_sb;
     int i;
 
     init_put_bits(&pbc, data, MAX_PARAM_BUFFER_SIZE);
@@ -321,18 +329,34 @@ static int vaapi_encode_av1_write_frame_header(AVCodecContext *avctx,
 
     /** tile_info() */
     put_bits(&pbc, 1, fh->uniform_tile_spacing_flag);
-    for (i = 0; i < priv->tile_cols_log2 - priv->min_log2_tile_cols; i++) {
-        put_bits(&pbc, 1, 1);
-    }
-    if (priv->tile_cols_log2 < priv->max_log2_tile_cols)
-        put_bits(&pbc, 1, 0);
+    if (fh->uniform_tile_spacing_flag) {
+        for (i = 0; i < priv->tile_cols_log2 - priv->min_log2_tile_cols; i++) {
+            put_bits(&pbc, 1, 1);
+        }
+        if (priv->tile_cols_log2 < priv->max_log2_tile_cols)
+            put_bits(&pbc, 1, 0);
 
-    for (i = 0; i < priv->tile_rows_log2 - priv->min_log2_tile_rows; i++) {
-        put_bits(&pbc, 1, 1);
+        for (i = 0; i < priv->tile_rows_log2 - priv->min_log2_tile_rows; i++) {
+            put_bits(&pbc, 1, 1);
+        }
+        if (priv->tile_rows_log2 < priv->max_log2_tile_rows)
+            put_bits(&pbc, 1, 0);
+    } else {
+        widest_tile_sb = 0;
+        for(i = 0, start_sb = 0; start_sb < priv->sb_cols; i++) {
+            max_width = FFMIN(priv->sb_cols - start_sb, priv->max_tile_width_sb);
+            put_ns(&pbc, max_width, fh->width_in_sbs_minus_1[i]);
+            start_sb += fh->width_in_sbs_minus_1[i] + 1;
+            widest_tile_sb = FFMAX(start_sb, widest_tile_sb);
+        }
+        max_tile_height_sb = FFMAX(priv->max_tile_area_sb / widest_tile_sb, 1); 
+        for(i = 0, start_sb = 0; start_sb < priv->sb_rows; i++) {
+            max_height = FFMIN(priv->sb_rows - start_sb, max_tile_height_sb);
+            put_ns(&pbc, max_height, fh->height_in_sbs_minus_1[i]);
+            start_sb += fh->height_in_sbs_minus_1[i] + 1;
+        }
     }
-    if (priv->tile_rows_log2 < priv->max_log2_tile_rows)
-        put_bits(&pbc, 1, 0);
-
+    
     if (priv->tile_cols_log2 || priv->tile_rows_log2) {
         put_bits(&pbc, priv->tile_cols_log2 + priv->tile_rows_log2, fh->context_update_tile_id);
         put_bits(&pbc, 2, fh->tile_size_bytes_minus1);
@@ -585,7 +609,6 @@ static int vaapi_encode_av1_set_tile(AVCodecContext *avctx)
 {
     VAAPIEncodeAV1Context *priv = avctx->priv_data;
     int mi_cols, mi_rows, sb_shift, sb_size;
-    int max_tile_width_sb, max_tile_area_sb;
     int min_log2_tiles;
 
     /** Disable enable_128x128_superblock by default. */
@@ -599,14 +622,14 @@ static int vaapi_encode_av1_set_tile(AVCodecContext *avctx)
                     ((mi_rows + 31) >> 5) : ((mi_rows + 15) >> 4);
     sb_shift = priv->enable_128x128_superblock ? 5 : 4;
     sb_size  = sb_shift + 2;
-    max_tile_width_sb = AV1_MAX_TILE_WIDTH >> sb_size;
-    max_tile_area_sb  = AV1_MAX_TILE_AREA  >> (2 * sb_size);
+    priv->max_tile_width_sb = AV1_MAX_TILE_WIDTH >> sb_size;
+    priv->max_tile_area_sb  = AV1_MAX_TILE_AREA  >> (2 * sb_size);
 
-    priv->min_log2_tile_cols = tile_log2(max_tile_width_sb, priv->sb_cols);
+    priv->min_log2_tile_cols = tile_log2(priv->max_tile_width_sb, priv->sb_cols);
     priv->max_log2_tile_cols = tile_log2(1, FFMIN(priv->sb_cols, AV1_MAX_TILE_COLS));
     priv->max_log2_tile_rows = tile_log2(1, FFMIN(priv->sb_rows, AV1_MAX_TILE_ROWS));
     min_log2_tiles = FFMAX(priv->min_log2_tile_cols,
-                           tile_log2(max_tile_area_sb, priv->sb_rows * priv->sb_cols));
+                           tile_log2(priv->max_tile_area_sb, priv->sb_rows * priv->sb_cols));
     priv->min_log2_tile_rows = FFMAX(min_log2_tiles - priv->tile_cols_log2, 0);
 
     if (priv->tile_cols_log2 != av_clip(priv->tile_cols_log2, priv->min_log2_tile_cols, priv->max_log2_tile_cols) ||
@@ -620,11 +643,10 @@ static int vaapi_encode_av1_set_tile(AVCodecContext *avctx)
     /** only support uniformed tile mode. */
     priv->tile_width_sb  = (priv->sb_cols + (1 << priv->tile_cols_log2) - 1) >>
                             priv->tile_cols_log2;
-    priv->tile_height_sb = (priv->sb_rows + (1 << priv->tile_rows_log2) - 1) >>
-                            priv->tile_rows_log2;
-    priv->tile_cols = (priv->sb_cols + priv->tile_width_sb - 1) / priv->tile_width_sb;
-    priv->tile_rows = (priv->sb_rows + priv->tile_height_sb - 1) / priv->tile_height_sb;
-
+    priv->tile_width_sb = priv->sb_cols < 10 ? 4 : (priv->tile_width_sb + 2) & 0xFE;
+    priv->tile_height_sb = priv->sb_rows >> priv->tile_rows_log2;
+    priv->tile_cols = 1 << priv->tile_cols_log2;
+    priv->tile_rows = 1 << priv->tile_rows_log2;
     /** check if tile cols/rows is supported by driver. */
     if (priv->attr_ext2.bits.max_tile_num_minus1) {
         if ((priv->tile_cols * priv->tile_rows - 1) > priv->attr_ext2.bits.max_tile_num_minus1) {
@@ -816,7 +838,7 @@ static int vaapi_encode_av1_init_picture_params(AVCodecContext *avctx,
     VAEncPictureParameterBufferAV1 *vpic = pic->codec_picture_params;
     CodedBitstreamFragment          *obu = &priv->current_obu;
     VAAPIEncodeAV1Picture *href0, *href1;
-    int slot, i;
+    int slot, i, rest;
     int ret;
     static const int8_t default_loop_filter_ref_deltas[AV1_TOTAL_REFS_PER_FRAME] =
         { 1, 0, 0, 0, -1, 0, -1, -1 };
@@ -932,7 +954,12 @@ static int vaapi_encode_av1_init_picture_params(AVCodecContext *avctx,
     fh->tile_rows                 = priv->tile_rows;
     fh->tile_cols_log2            = priv->tile_cols_log2;
     fh->tile_rows_log2            = priv->tile_rows_log2;
-    fh->uniform_tile_spacing_flag = 1;
+    
+    if(fh->tile_cols == 1 && fh->tile_rows == 1)
+        fh->uniform_tile_spacing_flag = 1;
+    else
+        fh->uniform_tile_spacing_flag = 0;
+        
     fh->tile_size_bytes_minus1    = priv->attr_ext2.bits.tile_size_bytes_minus1;
 
 
@@ -949,9 +976,8 @@ static int vaapi_encode_av1_init_picture_params(AVCodecContext *avctx,
         fh->width_in_sbs_minus_1[i] = priv->tile_width_sb - 1;
     fh->width_in_sbs_minus_1[i] = priv->sb_cols - (fh->tile_cols - 1) * priv->tile_width_sb - 1;
 
-    for (i=0; i < fh->tile_rows - 1; i++)
-        fh->height_in_sbs_minus_1[i] = priv->tile_height_sb - 1;
-    fh->height_in_sbs_minus_1[i] = priv->sb_rows - (fh->tile_rows - 1) * priv->tile_height_sb - 1;
+    for (i=0, rest=priv->sb_rows % priv->tile_rows; i < fh->tile_rows; i++)
+        fh->height_in_sbs_minus_1[i] = priv->tile_height_sb - 1 + (rest-- > 0 ? 1 : 0);
 
     for (i=0; i < fh->tile_cols; i++)
         vpic->width_in_sbs_minus_1[i] = fh->width_in_sbs_minus_1[i];
@@ -1359,9 +1385,9 @@ static const AVOption vaapi_encode_av1_options[] = {
 #undef LEVEL
 
     { "tile_cols_log2", "Log2 of columns number for tiled encoding",
-      OFFSET(tile_cols_log2), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, AV1_LOG2_MAX_TILE_COLS, FLAGS },
+      OFFSET(tile_cols_log2), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, W6_AV1_LOG2_MAX_TILE_COLS, FLAGS },
     { "tile_rows_log2", "Log2 of rows number for tiled encoding",
-      OFFSET(tile_rows_log2), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, AV1_LOG2_MAX_TILE_ROWS, FLAGS },
+      OFFSET(tile_rows_log2), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, W6_AV1_LOG2_MAX_TILE_ROWS, FLAGS },
     { "tile_groups", "Number of tile groups for encoding",
       OFFSET(tile_groups), AV_OPT_TYPE_INT, { .i64 = 1 }, 1, AV1_MAX_TILE_ROWS * AV1_MAX_TILE_COLS, FLAGS },
 
