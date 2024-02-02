@@ -979,6 +979,8 @@ static int vaapi_encode_av1_init_picture_params(AVCodecContext *avctx,
     for (i=0, rest=priv->sb_rows % priv->tile_rows; i < fh->tile_rows; i++)
         fh->height_in_sbs_minus_1[i] = priv->tile_height_sb - 1 + (rest-- > 0 ? 1 : 0);
 
+    vpic->picture_flags.bits.show_frame = fh->show_frame;
+
     for (i=0; i < fh->tile_cols; i++)
         vpic->width_in_sbs_minus_1[i] = fh->width_in_sbs_minus_1[i];
     for (i=0; i < fh->tile_rows; i++)
@@ -1117,7 +1119,7 @@ static int vaapi_encode_av1_init_picture_params(AVCodecContext *avctx,
     vpic->picture_flags.bits.reduced_tx_set       = fh->reduced_tx_set;
     vpic->picture_flags.bits.error_resilient_mode = fh->error_resilient_mode;
 
-    vpic->mode_control_flags.bits.reference_mode = fh->reference_select ? 2 : 0;
+    vpic->mode_control_flags.bits.reference_mode = fh->reference_select;
     vpic->mode_control_flags.bits.tx_mode = fh->tx_mode;
 
     vpic->tile_group_obu_hdr_info.bits.obu_has_size_field = 1;
@@ -1141,6 +1143,32 @@ static int vaapi_encode_av1_init_picture_params(AVCodecContext *avctx,
     ret = vaapi_encode_av1_write_frame_header(avctx, pic, priv->fh_data, &priv->fh_data_len);
     if (ret < 0)
         goto end;
+        
+    if (!(ctx->va_packed_headers & VA_ENC_PACKED_HEADER_PICTURE)){
+        pic->tail_size = 0;
+        AV1RawFrameHeader       *rep_fh = &fh_obu->obu.frame_header;
+        /** Pack repeat frame header. */
+        if ((pic->type == PICTURE_TYPE_B) && (pic->next->type == PICTURE_TYPE_P)) {
+            memset(fh_obu, 0, sizeof(*fh_obu));
+            href0 = pic->refs[0]->priv_data;
+            fh_obu->header.obu_type = AV1_OBU_FRAME_HEADER;
+            fh_obu->header.obu_has_size_field = 1;
+
+            rep_fh->show_existing_frame   = 1;
+            rep_fh->frame_to_show_map_idx = href0->slot == 0;
+            rep_fh->frame_type            = AV1_FRAME_INTER;
+            rep_fh->frame_width_minus_1   = avctx->width - 1;
+            rep_fh->frame_height_minus_1  = avctx->height - 1;
+            rep_fh->render_width_minus_1  = rep_fh->frame_width_minus_1;
+            rep_fh->render_height_minus_1 = rep_fh->frame_height_minus_1;
+
+            ret = vaapi_encode_av1_write_frame_header(avctx, pic, pic->tail_data, &pic->tail_size);
+            if (ret < 0)
+                goto end;
+
+            pic->tail_size /= 8;
+        }        
+    }
 
 end:
     ff_cbs_fragment_reset(obu);
