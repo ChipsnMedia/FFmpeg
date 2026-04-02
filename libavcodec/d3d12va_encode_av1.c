@@ -57,6 +57,7 @@ typedef struct D3D12VAHWBaseEncodeAV1Opts {
     int   enable_restoration; // loop restoration
     int      enable_superres; // super-resolution
     int enable_ref_frame_mvs;
+    int   enable_order_hint_tools;
 
     int            enable_jnt_comp;
     int  enable_128x128_superblock;
@@ -64,6 +65,7 @@ typedef struct D3D12VAHWBaseEncodeAV1Opts {
     int       enable_warped_motion;
     int   enable_intra_edge_filter;
     int enable_interintra_compound;
+    int enable_auto_segmentation;
     int     enable_masked_compound;
     int        enable_filter_intra;
 
@@ -523,7 +525,12 @@ static int d3d12va_hw_base_encode_init_params_av1(FFHWBaseEncodeContext *base_ct
     seq->enable_masked_compound = opts->enable_masked_compound;
     seq->enable_warped_motion = opts->enable_warped_motion;
     seq->enable_dual_filter = opts->enable_dual_filter;
-    seq->enable_order_hint = !seq->still_picture;
+    if (seq->still_picture == 1) {
+        seq->enable_order_hint = 0;
+    }
+    else {
+        seq->enable_order_hint = opts->enable_order_hint_tools;
+    }
     if (seq->enable_order_hint) {
         seq->order_hint_bits_minus_1 = 7;
     }
@@ -670,6 +677,12 @@ static int d3d12va_encode_av1_get_encoder_caps(AVCodecContext *avctx)
     config = ctx->codec_conf.pAV1Config;
 
     config->FeatureFlags = D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_NONE;
+
+    if (av1_caps.SupportedFeatureFlags & D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_ORDER_HINT_TOOLS) {
+        config->FeatureFlags |= D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_ORDER_HINT_TOOLS;
+        priv->unit_opts.enable_order_hint_tools = 1;
+    }
+
     if (av1_caps.SupportedFeatureFlags & D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_128x128_SUPERBLOCK) {
         config->FeatureFlags |= D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_128x128_SUPERBLOCK;
         priv->unit_opts.enable_128x128_superblock = 1;
@@ -680,7 +693,7 @@ static int d3d12va_encode_av1_get_encoder_caps(AVCodecContext *avctx)
 
     if (av1_caps.SupportedFeatureFlags & D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_LOOP_RESTORATION_FILTER) {
         config->FeatureFlags |= D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_LOOP_RESTORATION_FILTER;
-        priv->unit_opts.enable_loop_filter = 1;
+        priv->unit_opts.enable_restoration = 1;
     }
 
     if (av1_caps.SupportedFeatureFlags & D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_PALETTE_ENCODING) {
@@ -741,6 +754,11 @@ static int d3d12va_encode_av1_get_encoder_caps(AVCodecContext *avctx)
         priv->unit_opts.enable_interintra_compound = 1;
     }
 
+    if (av1_caps.SupportedFeatureFlags & D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_AUTO_SEGMENTATION) {
+        // Auto segmentation
+        config->FeatureFlags |= D3D12_VIDEO_ENCODER_AV1_FEATURE_FLAG_AUTO_SEGMENTATION;
+        priv->unit_opts.enable_auto_segmentation = 1;
+    }
     return 0;
 }
 
@@ -995,6 +1013,8 @@ static int d3d12va_encode_av1_init_picture_params(AVCodecContext *avctx,
     d3d12va_pic->pic_ctl.pAV1PicData->PrimaryRefFrame = fh->primary_ref_frame;
     if (fh->error_resilient_mode)
         d3d12va_pic->pic_ctl.pAV1PicData->Flags |= D3D12_VIDEO_ENCODER_AV1_PICTURE_CONTROL_FLAG_ENABLE_ERROR_RESILIENT_MODE;
+    if (priv->unit_opts.enable_auto_segmentation)
+        d3d12va_pic->pic_ctl.pAV1PicData->Flags |= D3D12_VIDEO_ENCODER_AV1_PICTURE_CONTROL_FLAG_ENABLE_FRAME_SEGMENTATION_AUTO;
 
     if (pic->type == FF_HW_PICTURE_TYPE_IDR)
     {
