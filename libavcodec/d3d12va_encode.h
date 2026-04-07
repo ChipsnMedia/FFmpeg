@@ -23,6 +23,8 @@
 #ifndef AVCODEC_D3D12VA_ENCODE_H
 #define AVCODEC_D3D12VA_ENCODE_H
 
+#include <stdio.h>
+
 #include "libavutil/fifo.h"
 #include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_d3d12va_internal.h"
@@ -104,6 +106,53 @@ enum {
     RC_MODE_MAX = RC_MODE_QVBR,
 };
 
+/**
+ * DX Bitstream file format structures.
+ * IVF-based container for capturing D3D12 encoder parameters.
+ */
+#define DX_IVF_SIGNATURE    MKTAG('D', 'X', 'I', 'F')
+#define DX_FRAME_SIGNATURE  MKTAG('D', 'X', 'F', 'H')
+#define DX_BUFFER_SIGNATURE MKTAG('D', 'X', 'B', 'H')
+
+typedef struct DXIvfHeader {
+    uint32_t signature;       // DXIF
+    uint16_t version;
+    uint16_t length;          // header length (32)
+    uint32_t fourcc;          // codec fourcc
+    uint16_t width;
+    uint16_t height;
+    uint32_t framerate;
+    uint32_t profile;         // D3D12 encoder profile value
+    uint32_t frame_count;
+    uint32_t input_format;    // DXGI_FORMAT
+} DXIvfHeader;
+
+#pragma pack(push, 1)
+typedef struct DXIvfFrameHeader {
+    uint32_t size;            // IVF frame data size (not including this 12-byte header)
+    int64_t  timestamp;
+} DXIvfFrameHeader;
+#pragma pack(pop)
+
+typedef struct DXFrameHeader {
+    uint32_t signature;       // DXFH
+    uint32_t frame_index;
+    uint32_t num_buffers;
+} DXFrameHeader;
+
+typedef struct DXBufferHeader {
+    uint32_t signature;       // DXBH
+    uint32_t dx_buffer_type;
+    int32_t  dx_buffer_size;
+} DXBufferHeader;
+
+enum DXBufferType {
+    DX_BUFFER_TYPE_ENCODEFRAME_INPUT       = 0,
+    DX_BUFFER_TYPE_ENCODEFRAME_OUTPUT      = 1,
+    DX_BUFFER_TYPE_RESOLVE_METADATA_INPUT  = 2,
+    DX_BUFFER_TYPE_RESOLVE_METADATA_OUTPUT = 3,
+    DX_BUFFER_TYPE_QP_MAP                  = 4,
+};
 
 typedef struct D3D12VAEncodeRCMode {
     /**
@@ -290,6 +339,21 @@ typedef struct D3D12VAEncodeContext {
      * QP map region pixel size (block size for QP map)
      */
     int qp_map_region_size;
+
+    /**
+     * DX bitstream file output path (user option).
+     */
+    char *dx_bitstream_path;
+
+    /**
+     * DX bitstream file handle.
+     */
+    FILE *dx_bitstream_file;
+
+    /**
+     * DX bitstream frame counter.
+     */
+    uint32_t dx_frame_count;
 } D3D12VAEncodeContext;
 
 typedef struct D3D12VAEncodeType {
@@ -425,7 +489,11 @@ void ff_d3d12va_encode_check_encoder_feature_flags(void *log_ctx,
     D3D12VA_ENCODE_ME_PRECISION_MODE(full_pixel, FULL_PIXEL, Full), \
     D3D12VA_ENCODE_ME_PRECISION_MODE(half_pixel, HALF_PIXEL, Half), \
     D3D12VA_ENCODE_ME_PRECISION_MODE(quarter_pixel, QUARTER_PIXEL, Quarter) \
-    FFPP_D3D12VA_ME_PRECISION_EIGHTH_PIXEL
+    FFPP_D3D12VA_ME_PRECISION_EIGHTH_PIXEL, \
+    { "dx_bitstream", \
+      "Path to output DX bitstream file (.ivf)", \
+      OFFSET(common.dx_bitstream_path), AV_OPT_TYPE_STRING, \
+      { .str = NULL }, 0, 0, FLAGS }
 
 #define D3D12VA_ENCODE_RC_MODE(name, desc) \
     { #name, desc, 0, AV_OPT_TYPE_CONST, { .i64 = RC_MODE_ ## name }, \

@@ -314,6 +314,138 @@ static int d3d12va_encode_create_metadata_buffers(AVCodecContext *avctx,
     return 0;
 }
 
+static uint32_t d3d12va_dx_get_codec_fourcc(const D3D12VAEncodeContext *ctx)
+{
+    switch (ctx->codec->d3d12_codec) {
+    case D3D12_VIDEO_ENCODER_CODEC_H264:
+        return MKTAG('H', '2', '6', '4');
+    case D3D12_VIDEO_ENCODER_CODEC_HEVC:
+        return MKTAG('H', 'E', 'V', 'C');
+#if CONFIG_AV1_D3D12VA_ENCODER
+    case D3D12_VIDEO_ENCODER_CODEC_AV1:
+        return MKTAG('A', 'V', '1', '0');
+#endif
+    default:
+        return 0;
+    }
+}
+
+static uint32_t d3d12va_dx_get_profile_value(const D3D12VAEncodeContext *ctx)
+{
+    switch (ctx->codec->d3d12_codec) {
+    case D3D12_VIDEO_ENCODER_CODEC_H264:
+        return (uint32_t)*ctx->profile->d3d12_profile.pH264Profile;
+    case D3D12_VIDEO_ENCODER_CODEC_HEVC:
+        return (uint32_t)*ctx->profile->d3d12_profile.pHEVCProfile;
+#if CONFIG_AV1_D3D12VA_ENCODER
+    case D3D12_VIDEO_ENCODER_CODEC_AV1:
+        return (uint32_t)*ctx->profile->d3d12_profile.pAV1Profile;
+#endif
+    default:
+        return 0;
+    }
+}
+
+static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx)
+{
+    D3D12VAEncodeContext *ctx = avctx->priv_data;
+    FFHWBaseEncodeContext *base_ctx = avctx->priv_data;
+    AVD3D12VAFramesContext *frames_hwctx = base_ctx->input_frames->hwctx;
+
+    DXIvfHeader hdr = {
+        .signature    = DX_IVF_SIGNATURE,
+        .version      = 0,
+        .length       = sizeof(DXIvfHeader),
+        .fourcc       = d3d12va_dx_get_codec_fourcc(ctx),
+        .width        = ctx->resolution.Width,
+        .height       = ctx->resolution.Height,
+        .framerate    = avctx->framerate.num ? avctx->framerate.num / FFMAX(avctx->framerate.den, 1) : 30,
+        .profile      = d3d12va_dx_get_profile_value(ctx),
+        .frame_count  = 0,
+        .input_format = frames_hwctx->format,
+    };
+
+    fwrite(&hdr, sizeof(hdr), 1, ctx->dx_bitstream_file);
+    fflush(ctx->dx_bitstream_file);
+
+    av_log(avctx, AV_LOG_INFO, "DX bitstream: wrote IVF header (fourcc=0x%08x, %dx%d, profile=%u, format=%u)\n",
+           hdr.fourcc, hdr.width, hdr.height, hdr.profile, hdr.input_format);
+}
+
+static void d3d12va_dx_bitstream_write_buffer(FILE *f, uint32_t type, const void *data, int32_t size)
+{
+    DXBufferHeader buf_hdr = {
+        .signature      = DX_BUFFER_SIGNATURE,
+        .dx_buffer_type = type,
+        .dx_buffer_size = size,
+    };
+    fwrite(&buf_hdr, sizeof(buf_hdr), 1, f);
+    fwrite(data, size, 1, f);
+}
+
+static void d3d12va_dx_bitstream_write_frame(
+    AVCodecContext *avctx,
+    const D3D12_VIDEO_ENCODER_ENCODEFRAME_INPUT_ARGUMENTS *input_args,
+    const D3D12_VIDEO_ENCODER_ENCODEFRAME_OUTPUT_ARGUMENTS *output_args,
+    const D3D12_VIDEO_ENCODER_RESOLVE_METADATA_INPUT_ARGUMENTS *input_metadata,
+    const D3D12_VIDEO_ENCODER_RESOLVE_METADATA_OUTPUT_ARGUMENTS *output_metadata,
+    const void *qp_map, int qp_map_size)
+{
+    D3D12VAEncodeContext *ctx = avctx->priv_data;
+    FILE *f = ctx->dx_bitstream_file;
+    uint32_t num_buffers = 4;
+    uint32_t frame_data_size;
+
+    if (qp_map && qp_map_size > 0)
+        num_buffers = 5;
+
+    frame_data_size = sizeof(DXFrameHeader)
+        + sizeof(DXBufferHeader) + sizeof(*input_args)
+        + sizeof(DXBufferHeader) + sizeof(*output_args)
+        + sizeof(DXBufferHeader) + sizeof(*input_metadata)
+        + sizeof(DXBufferHeader) + sizeof(*output_metadata);
+
+    if (qp_map && qp_map_size > 0)
+        frame_data_size += sizeof(DXBufferHeader) + qp_map_size;
+
+    // IVF frame header (12 bytes packed: uint32 size + int64 timestamp)
+    fwrite(&frame_data_size, sizeof(uint32_t), 1, f);
+    {
+        int64_t timestamp = ctx->dx_frame_count;
+        fwrite(&timestamp, sizeof(int64_t), 1, f);
+    }
+
+    // DX frame header
+    {
+        DXFrameHeader dx_hdr = {
+            .signature   = DX_FRAME_SIGNATURE,
+            .frame_index = ctx->dx_frame_count,
+            .num_buffers = num_buffers,
+        };
+        fwrite(&dx_hdr, sizeof(dx_hdr), 1, f);
+    }
+
+    // DX buffers
+    d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_ENCODEFRAME_INPUT,
+                                      input_args, sizeof(*input_args));
+    d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_ENCODEFRAME_OUTPUT,
+                                      output_args, sizeof(*output_args));
+    d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_RESOLVE_METADATA_INPUT,
+                                      input_metadata, sizeof(*input_metadata));
+    d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_RESOLVE_METADATA_OUTPUT,
+                                      output_metadata, sizeof(*output_metadata));
+
+    if (qp_map && qp_map_size > 0)
+        d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_QP_MAP,
+                                          qp_map, qp_map_size);
+
+    fflush(f);
+    ctx->dx_frame_count++;
+
+    av_log(avctx, AV_LOG_DEBUG, "DX bitstream: wrote frame %u (%u buffers, %u bytes)\n",
+           ctx->dx_frame_count - 1, num_buffers, frame_data_size);
+}
+
 static int d3d12va_encode_issue(AVCodecContext *avctx,
                                 FFHWBaseEncodePicture *base_pic)
 {
@@ -628,6 +760,12 @@ static int d3d12va_encode_issue(AVCodecContext *avctx,
     ID3D12VideoEncodeCommandList2_ResourceBarrier(cmd_list, 1, &barriers[3]);
 
     ID3D12VideoEncodeCommandList2_ResolveEncoderOutputMetadata(cmd_list, &input_metadata, &output_metadata);
+
+    // Write DX bitstream frame data
+    if (ctx->dx_bitstream_file)
+        d3d12va_dx_bitstream_write_frame(avctx, &input_args, &output_args,
+                                         &input_metadata, &output_metadata,
+                                         pic->qp_map, pic->qp_map_size);
 
     if (barriers_ref_index > 0) {
         for (i = 0; i < barriers_ref_index; i++)
@@ -1471,6 +1609,9 @@ static int d3d12va_create_encoder(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
+    if (ctx->dx_bitstream_file)
+        d3d12va_dx_bitstream_write_ivf_header(avctx);
+
     return 0;
 }
 
@@ -1842,6 +1983,19 @@ int ff_d3d12va_encode_init(AVCodecContext *avctx)
     base_ctx->output_delay = base_ctx->b_per_p;
     base_ctx->decode_delay = base_ctx->max_b_depth;
 
+    // Open DX bitstream file if path is specified
+    if (ctx->dx_bitstream_path && ctx->dx_bitstream_path[0]) {
+        ctx->dx_bitstream_file = fopen(ctx->dx_bitstream_path, "wb");
+        if (!ctx->dx_bitstream_file) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to open DX bitstream file: %s\n",
+                   ctx->dx_bitstream_path);
+            err = AVERROR(errno);
+            goto fail;
+        }
+        ctx->dx_frame_count = 0;
+        av_log(avctx, AV_LOG_INFO, "DX bitstream file: %s\n", ctx->dx_bitstream_path);
+    }
+
     err = d3d12va_create_encoder(avctx);
     if (err < 0)
         goto fail;
@@ -1904,6 +2058,16 @@ int ff_d3d12va_encode_close(AVCodecContext *avctx)
     D3D12_OBJECT_RELEASE(ctx->encoder);
     D3D12_OBJECT_RELEASE(ctx->video_device3);
     D3D12_OBJECT_RELEASE(ctx->device3);
+
+    // Close DX bitstream file and update IVF header frame count
+    if (ctx->dx_bitstream_file) {
+        fseek(ctx->dx_bitstream_file, offsetof(DXIvfHeader, frame_count), SEEK_SET);
+        fwrite(&ctx->dx_frame_count, sizeof(uint32_t), 1, ctx->dx_bitstream_file);
+        fclose(ctx->dx_bitstream_file);
+        ctx->dx_bitstream_file = NULL;
+        av_log(avctx, AV_LOG_INFO, "DX bitstream: closed file, total frames: %u\n",
+               ctx->dx_frame_count);
+    }
 
     ff_hw_base_encode_close(base_ctx);
 
