@@ -371,8 +371,8 @@ static uint32_t d3d12va_dx_get_profile_value(const D3D12VAEncodeContext *ctx)
 }
 
 static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx,
-                                                  const D3D12_VIDEO_ENCODER_DESC_STATIC *enc_desc_static,
-                                                  const D3D12_VIDEO_ENCODER_HEAP_DESC_STATIC *heap_desc_static)
+                                                  const D3D12_VIDEO_ENCODER_DESC *enc_desc,
+                                                  const D3D12_VIDEO_ENCODER_HEAP_DESC *heap_desc)
 {
     D3D12VAEncodeContext *ctx = avctx->priv_data;
     FFHWBaseEncodeContext *base_ctx = avctx->priv_data;
@@ -390,10 +390,50 @@ static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx,
         .frame_count  = 0,
         .input_format = frames_hwctx->format,
     };
-
     fwrite(&hdr, sizeof(hdr), 1, ctx->dx_bitstream_file);
-    fwrite(enc_desc_static, sizeof(*enc_desc_static), 1, ctx->dx_bitstream_file);
-    fwrite(heap_desc_static, sizeof(*heap_desc_static), 1, ctx->dx_bitstream_file);
+
+    //+start of copy enc_desc to enc_desc_static.
+    D3D12_VIDEO_ENCODER_DESC_STATIC enc_desc_static = {0};
+    enc_desc_static.NodeMask = enc_desc->NodeMask;
+    enc_desc_static.Flags = enc_desc->Flags;
+    enc_desc_static.EncodeCodec = enc_desc->EncodeCodec;
+    enc_desc_static.EncodeProfile.DataSize = enc_desc->EncodeProfile.DataSize;
+    if (enc_desc->EncodeProfile.DataSize > 0)
+        memcpy(&enc_desc_static.EncodeProfile.AV1Profile,
+               enc_desc->EncodeProfile.pAV1Profile,
+               enc_desc->EncodeProfile.DataSize);
+    enc_desc_static.InputFormat = enc_desc->InputFormat;
+    enc_desc_static.CodecConfiguration.DataSize = enc_desc->CodecConfiguration.DataSize;
+    if (enc_desc->CodecConfiguration.DataSize > 0)
+        memcpy(&enc_desc_static.CodecConfiguration.AV1Config,
+               enc_desc->CodecConfiguration.pAV1Config,
+               enc_desc->CodecConfiguration.DataSize);
+    enc_desc_static.MaxMotionEstimationPrecision = enc_desc->MaxMotionEstimationPrecision;
+    //-end of copy enc_desc to enc_desc_static.
+
+    //+start of copy heap_desc to heap_desc_static.
+    D3D12_VIDEO_ENCODER_HEAP_DESC_STATIC heap_desc_static = {0};
+    heap_desc_static.NodeMask = heap_desc->NodeMask;
+    heap_desc_static.Flags = heap_desc->Flags;
+    heap_desc_static.EncodeCodec = heap_desc->EncodeCodec;
+    heap_desc_static.EncodeProfile.DataSize = heap_desc->EncodeProfile.DataSize;
+    if (heap_desc->EncodeProfile.DataSize > 0)
+        memcpy(&heap_desc_static.EncodeProfile.AV1Profile,
+               heap_desc->EncodeProfile.pAV1Profile,
+               heap_desc->EncodeProfile.DataSize);
+    heap_desc_static.EncodeLevel.DataSize = heap_desc->EncodeLevel.DataSize;
+    if (heap_desc->EncodeLevel.DataSize > 0)
+        memcpy(&heap_desc_static.EncodeLevel.AV1LevelSetting,
+               heap_desc->EncodeLevel.pAV1LevelSetting,
+               heap_desc->EncodeLevel.DataSize);
+    heap_desc_static.ResolutionsListCount = heap_desc->ResolutionsListCount;
+    if (heap_desc->ResolutionsListCount > 0 && heap_desc->pResolutionList)
+        memcpy(&heap_desc_static.pResolutionList[0],
+               heap_desc->pResolutionList,
+               sizeof(heap_desc_static.pResolutionList[0]));
+    //-end of copy heap_desc to heap_desc_static.
+    fwrite(&enc_desc_static, sizeof(enc_desc_static), 1, ctx->dx_bitstream_file);
+    fwrite(&heap_desc_static, sizeof(heap_desc_static), 1, ctx->dx_bitstream_file);
     fflush(ctx->dx_bitstream_file);
 
     av_log(avctx, AV_LOG_INFO, "DX bitstream: wrote IVF header (fourcc=0x%08x, %dx%d, level_profile_tier=%u, format=%u)\n",
@@ -2307,39 +2347,27 @@ int ff_d3d12va_encode_init(AVCodecContext *avctx)
     if (ctx->dx_bitstream_file) {
         AVD3D12VAFramesContext *frames_hwctx = base_ctx->input_frames->hwctx;
 
-        D3D12_VIDEO_ENCODER_DESC_STATIC enc_desc_static = {
+        D3D12_VIDEO_ENCODER_DESC enc_desc = {
             .NodeMask                     = 0,
             .Flags                        = D3D12_VIDEO_ENCODER_FLAG_NONE,
             .EncodeCodec                  = ctx->codec->d3d12_codec,
-            // .EncodeProfile                = ctx->profile->d3d12_profile,
+            .EncodeProfile                = ctx->profile->d3d12_profile,
             .InputFormat                  = frames_hwctx->format,
-            // .CodecConfiguration           = ctx->codec_conf,
+            .CodecConfiguration           = ctx->codec_conf,
             .MaxMotionEstimationPrecision = ctx->me_precision,
         };
-        enc_desc_static.EncodeProfile.DataSize = ctx->profile->d3d12_profile.DataSize;
-        memcpy(&enc_desc_static.EncodeProfile.AV1Profile, ctx->profile->d3d12_profile.pAV1Profile, ctx->profile->d3d12_profile.DataSize);
-        enc_desc_static.CodecConfiguration.DataSize = ctx->codec_conf.DataSize;
-        memcpy(&enc_desc_static.CodecConfiguration.AV1Config, ctx->codec_conf.pAV1Config, ctx->codec_conf.DataSize);
 
-        D3D12_VIDEO_ENCODER_HEAP_DESC_STATIC heap_desc_static = {
+        D3D12_VIDEO_ENCODER_HEAP_DESC heap_desc = {
             .NodeMask             = 0,
             .Flags                = D3D12_VIDEO_ENCODER_HEAP_FLAG_NONE,
             .EncodeCodec          = ctx->codec->d3d12_codec,
-            // .EncodeProfile        = ctx->profile->d3d12_profile,
-            // .EncodeLevel          = ctx->level,
+            .EncodeProfile        = ctx->profile->d3d12_profile,
+            .EncodeLevel          = ctx->level,
             .ResolutionsListCount = 1,
-            // .pResolutionList      = &ctx->resolution,
+            .pResolutionList      = &ctx->resolution,
         };
-        heap_desc_static.EncodeProfile.DataSize = ctx->profile->d3d12_profile.DataSize;
-        memcpy(&heap_desc_static.EncodeProfile.AV1Profile, ctx->profile->d3d12_profile.pAV1Profile, ctx->profile->d3d12_profile.DataSize);
 
-        heap_desc_static.EncodeLevel.DataSize = ctx->level.DataSize;
-        memcpy(&heap_desc_static.EncodeLevel.AV1LevelSetting, ctx->level.pAV1LevelSetting, ctx->level.DataSize);
-
-        memcpy(&heap_desc_static.pResolutionList[0], &ctx->resolution, sizeof(ctx->resolution));
-
-
-        d3d12va_dx_bitstream_write_ivf_header(avctx, &enc_desc_static, &heap_desc_static);
+        d3d12va_dx_bitstream_write_ivf_header(avctx, &enc_desc, &heap_desc);
     }
 
     base_ctx->async_encode = 1;
