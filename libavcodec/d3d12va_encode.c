@@ -330,6 +330,30 @@ static uint32_t d3d12va_dx_get_codec_fourcc(const D3D12VAEncodeContext *ctx)
     }
 }
 
+static uint32_t d3d12va_dx_get_level_value(const D3D12VAEncodeContext *ctx)
+{
+    switch (ctx->codec->d3d12_codec) {
+    case D3D12_VIDEO_ENCODER_CODEC_H264:
+        return (uint32_t)*ctx->level.pH264LevelSetting;
+    case D3D12_VIDEO_ENCODER_CODEC_HEVC:
+        return (uint32_t)ctx->level.pHEVCLevelSetting->Level;
+#if CONFIG_AV1_D3D12VA_ENCODER
+    case D3D12_VIDEO_ENCODER_CODEC_AV1:
+        return (uint32_t)ctx->level.pAV1LevelSetting->Level;
+#endif
+    default:
+        return 0;
+    }
+}
+static uint32_t d3d12va_dx_get_tier_value(const D3D12VAEncodeContext *ctx)
+{
+#if CONFIG_AV1_D3D12VA_ENCODER
+    if (ctx->codec->d3d12_codec == D3D12_VIDEO_ENCODER_CODEC_AV1)
+        return (uint32_t)ctx->level.pAV1LevelSetting->Tier;
+#endif
+    return 0;
+}
+
 static uint32_t d3d12va_dx_get_profile_value(const D3D12VAEncodeContext *ctx)
 {
     switch (ctx->codec->d3d12_codec) {
@@ -346,7 +370,9 @@ static uint32_t d3d12va_dx_get_profile_value(const D3D12VAEncodeContext *ctx)
     }
 }
 
-static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx)
+static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx,
+                                                  const D3D12_VIDEO_ENCODER_DESC_STATIC *enc_desc_static,
+                                                  const D3D12_VIDEO_ENCODER_HEAP_DESC_STATIC *heap_desc_static)
 {
     D3D12VAEncodeContext *ctx = avctx->priv_data;
     FFHWBaseEncodeContext *base_ctx = avctx->priv_data;
@@ -360,16 +386,18 @@ static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx)
         .width        = ctx->resolution.Width,
         .height       = ctx->resolution.Height,
         .framerate    = avctx->framerate.num ? avctx->framerate.num / FFMAX(avctx->framerate.den, 1) : 30,
-        .profile      = d3d12va_dx_get_profile_value(ctx),
+        .level_profile_tier = (d3d12va_dx_get_tier_value(ctx) << 24) | (d3d12va_dx_get_profile_value(ctx) << 16) | d3d12va_dx_get_level_value(ctx),
         .frame_count  = 0,
         .input_format = frames_hwctx->format,
     };
 
     fwrite(&hdr, sizeof(hdr), 1, ctx->dx_bitstream_file);
+    fwrite(enc_desc_static, sizeof(*enc_desc_static), 1, ctx->dx_bitstream_file);
+    fwrite(heap_desc_static, sizeof(*heap_desc_static), 1, ctx->dx_bitstream_file);
     fflush(ctx->dx_bitstream_file);
 
-    av_log(avctx, AV_LOG_INFO, "DX bitstream: wrote IVF header (fourcc=0x%08x, %dx%d, profile=%u, format=%u)\n",
-           hdr.fourcc, hdr.width, hdr.height, hdr.profile, hdr.input_format);
+    av_log(avctx, AV_LOG_INFO, "DX bitstream: wrote IVF header (fourcc=0x%08x, %dx%d, level_profile_tier=%u, format=%u)\n",
+           hdr.fourcc, hdr.width, hdr.height, hdr.level_profile_tier, hdr.input_format);
 }
 
 static void d3d12va_dx_bitstream_write_buffer(FILE *f, uint32_t type, const void *data, int32_t size)
@@ -383,33 +411,295 @@ static void d3d12va_dx_bitstream_write_buffer(FILE *f, uint32_t type, const void
     fwrite(data, size, 1, f);
 }
 
+static int d3d12va_dx_read_input_frame(AVCodecContext *avctx,
+                                       AVD3D12VAFrame *input_surface,
+                                       uint8_t **out_data,
+                                       size_t *out_size)
+{
+    D3D12VAEncodeContext *ctx = avctx->priv_data;
+    FFHWBaseEncodeContext *base_ctx = avctx->priv_data;
+    AVD3D12VAFramesContext *frames_hwctx = base_ctx->input_frames->hwctx;
+    D3D12_RESOURCE_DESC tex_desc;
+    UINT64 total_size = 0;
+    ID3D12Resource *readback_buf = NULL;
+    ID3D12CommandAllocator *copy_alloc = NULL;
+    ID3D12GraphicsCommandList *copy_list = NULL;
+    ID3D12CommandQueue *copy_queue = NULL;
+    ID3D12Fence *copy_fence = NULL;
+    HANDLE copy_event = NULL;
+    HRESULT hr;
+    uint8_t *mapped_data = NULL;
+    uint8_t *result = NULL;
+    int err = 0;
+    int linesizes[4];
+
+    // Wait for input surface upload to complete
+    err = d3d12va_fence_completion(&input_surface->sync_ctx);
+    if (err < 0)
+        return err;
+
+    // Get texture description
+    input_surface->texture->lpVtbl->GetDesc(input_surface->texture, &tex_desc);
+
+    // Calculate linesizes with D3D12 alignment
+    for (int i = 0; i < 4; i++)
+        linesizes[i] = FFALIGN(base_ctx->input_frames->width *
+                               (frames_hwctx->format == DXGI_FORMAT_P010 ? 2 : 1),
+                               D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+
+    // Calculate total buffer size: Y + UV (NV12/P010 typical case)
+    total_size = linesizes[0] * base_ctx->input_frames->height +
+                 linesizes[0] * (base_ctx->input_frames->height >> 1);
+
+    // Create readback buffer
+    D3D12_HEAP_PROPERTIES heap_props = { .Type = D3D12_HEAP_TYPE_READBACK };
+    D3D12_RESOURCE_DESC buf_desc = {
+        .Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER,
+        .Alignment        = 0,
+        .Width            = total_size,
+        .Height           = 1,
+        .DepthOrArraySize = 1,
+        .MipLevels        = 1,
+        .Format           = DXGI_FORMAT_UNKNOWN,
+        .SampleDesc       = { .Count = 1, .Quality = 0 },
+        .Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        .Flags            = D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    hr = ID3D12Device_CreateCommittedResource(ctx->hwctx->device, &heap_props,
+        D3D12_HEAP_FLAG_NONE, &buf_desc, D3D12_RESOURCE_STATE_COPY_DEST,
+        NULL, &IID_ID3D12Resource, (void **)&readback_buf);
+    if (FAILED(hr)) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to create frame readback buffer\n");
+        return AVERROR(ENOMEM);
+    }
+
+    // Create copy command objects
+    D3D12_COMMAND_QUEUE_DESC queue_desc = {
+        .Type  = D3D12_COMMAND_LIST_TYPE_COPY,
+        .Flags = D3D12_COMMAND_QUEUE_FLAG_NONE,
+    };
+
+    hr = ID3D12Device_CreateCommandQueue(ctx->hwctx->device, &queue_desc,
+        &IID_ID3D12CommandQueue, (void **)&copy_queue);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    hr = ID3D12Device_CreateCommandAllocator(ctx->hwctx->device,
+        D3D12_COMMAND_LIST_TYPE_COPY, &IID_ID3D12CommandAllocator, (void **)&copy_alloc);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    hr = ID3D12Device_CreateCommandList(ctx->hwctx->device, 0,
+        D3D12_COMMAND_LIST_TYPE_COPY, copy_alloc, NULL,
+        &IID_ID3D12GraphicsCommandList, (void **)&copy_list);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    // Record copy commands: Y plane + UV plane
+    {
+        UINT64 luma_size = (UINT64)linesizes[0] * base_ctx->input_frames->height;
+
+        D3D12_TEXTURE_COPY_LOCATION dst_y = {
+            .pResource = readback_buf,
+            .Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+            .PlacedFootprint = {
+                .Offset = 0,
+                .Footprint = {
+                    .Format   = (frames_hwctx->format == DXGI_FORMAT_P010) ?
+                                 DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R8_UNORM,
+                    .Width    = base_ctx->input_frames->width,
+                    .Height   = base_ctx->input_frames->height,
+                    .Depth    = 1,
+                    .RowPitch = linesizes[0],
+                },
+            },
+        };
+        D3D12_TEXTURE_COPY_LOCATION src_y = {
+            .pResource = input_surface->texture,
+            .Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+            .SubresourceIndex = 0,
+        };
+        ID3D12GraphicsCommandList_CopyTextureRegion(copy_list, &dst_y, 0, 0, 0, &src_y, NULL);
+
+        D3D12_TEXTURE_COPY_LOCATION dst_uv = {
+            .pResource = readback_buf,
+            .Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
+            .PlacedFootprint = {
+                .Offset = luma_size,
+                .Footprint = {
+                    .Format   = (frames_hwctx->format == DXGI_FORMAT_P010) ?
+                                 DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R8G8_UNORM,
+                    .Width    = base_ctx->input_frames->width >> 1,
+                    .Height   = base_ctx->input_frames->height >> 1,
+                    .Depth    = 1,
+                    .RowPitch = linesizes[0],
+                },
+            },
+        };
+        D3D12_TEXTURE_COPY_LOCATION src_uv = {
+            .pResource = input_surface->texture,
+            .Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+            .SubresourceIndex = 1,
+        };
+        ID3D12GraphicsCommandList_CopyTextureRegion(copy_list, &dst_uv, 0, 0, 0, &src_uv, NULL);
+    }
+
+    hr = ID3D12GraphicsCommandList_Close(copy_list);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    // Wait for input upload fence, then execute copy
+    hr = ID3D12CommandQueue_Wait(copy_queue, input_surface->sync_ctx.fence,
+                                 input_surface->sync_ctx.fence_value);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    ID3D12CommandQueue_ExecuteCommandLists(copy_queue, 1, (ID3D12CommandList **)&copy_list);
+
+    // Create fence and wait for copy completion
+    hr = ID3D12Device_CreateFence(ctx->hwctx->device, 0, D3D12_FENCE_FLAG_NONE,
+        &IID_ID3D12Fence, (void **)&copy_fence);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    copy_event = CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!copy_event) { err = AVERROR(ENOMEM); goto fail; }
+
+    hr = ID3D12CommandQueue_Signal(copy_queue, copy_fence, 1);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    if (FAILED(ID3D12Fence_SetEventOnCompletion(copy_fence, 1, copy_event))) {
+        err = AVERROR_UNKNOWN;
+        goto fail;
+    }
+    WaitForSingleObjectEx(copy_event, INFINITE, FALSE);
+
+    // Map and read data
+    hr = ID3D12Resource_Map(readback_buf, 0, NULL, (void **)&mapped_data);
+    if (FAILED(hr)) { err = AVERROR_UNKNOWN; goto fail; }
+
+    result = av_malloc(total_size);
+    if (!result) {
+        ID3D12Resource_Unmap(readback_buf, 0, NULL);
+        err = AVERROR(ENOMEM);
+        goto fail;
+    }
+
+    memcpy(result, mapped_data, total_size);
+    ID3D12Resource_Unmap(readback_buf, 0, NULL);
+
+    *out_data = result;
+    *out_size = (size_t)total_size;
+
+    av_log(avctx, AV_LOG_DEBUG, "DX bitstream: read input frame %zu bytes\n", (size_t)total_size);
+
+fail:
+    if (copy_event)
+        CloseHandle(copy_event);
+    D3D12_OBJECT_RELEASE(copy_fence);
+    D3D12_OBJECT_RELEASE(copy_list);
+    D3D12_OBJECT_RELEASE(copy_alloc);
+    D3D12_OBJECT_RELEASE(copy_queue);
+    D3D12_OBJECT_RELEASE(readback_buf);
+
+    if (err < 0)
+        av_freep(&result);
+
+    return err;
+}
+
 static void d3d12va_dx_bitstream_write_frame(
     AVCodecContext *avctx,
     const D3D12_VIDEO_ENCODER_ENCODEFRAME_INPUT_ARGUMENTS *input_args,
     const D3D12_VIDEO_ENCODER_ENCODEFRAME_OUTPUT_ARGUMENTS *output_args,
     const D3D12_VIDEO_ENCODER_RESOLVE_METADATA_INPUT_ARGUMENTS *input_metadata,
     const D3D12_VIDEO_ENCODER_RESOLVE_METADATA_OUTPUT_ARGUMENTS *output_metadata,
-    const void *qp_map, int qp_map_size)
+    const void *qp_map, int qp_map_size,
+    const uint8_t *frame_data, size_t frame_data_size)
 {
     D3D12VAEncodeContext *ctx = avctx->priv_data;
     FILE *f = ctx->dx_bitstream_file;
     uint32_t num_buffers = 4;
-    uint32_t frame_data_size;
+    uint32_t ivf_frame_size;
+
+    //+start of copy input_args to input_args_static.
+    D3D12_VIDEO_ENCODER_ENCODEFRAME_INPUT_ARGUMENTS_STATIC input_args_static = {0};
+
+    input_args_static.SequenceControlDesc.Flags = input_args->SequenceControlDesc.Flags;
+    input_args_static.SequenceControlDesc.IntraRefreshConfig = input_args->SequenceControlDesc.IntraRefreshConfig;
+
+    input_args_static.SequenceControlDesc.RateControl.Mode = input_args->SequenceControlDesc.RateControl.Mode;
+    input_args_static.SequenceControlDesc.RateControl.Flags = input_args->SequenceControlDesc.RateControl.Flags;
+    input_args_static.SequenceControlDesc.RateControl.ConfigParams.DataSize = input_args->SequenceControlDesc.RateControl.ConfigParams.DataSize;
+    if (input_args->SequenceControlDesc.RateControl.ConfigParams.DataSize > 0)
+        memcpy(&input_args_static.SequenceControlDesc.RateControl.ConfigParams.Configuration_VBR,
+               input_args->SequenceControlDesc.RateControl.ConfigParams.pConfiguration_VBR,
+               input_args->SequenceControlDesc.RateControl.ConfigParams.DataSize);
+    input_args_static.SequenceControlDesc.RateControl.TargetFrameRate = input_args->SequenceControlDesc.RateControl.TargetFrameRate;
+
+    input_args_static.SequenceControlDesc.PictureTargetResolution = input_args->SequenceControlDesc.PictureTargetResolution;
+    input_args_static.SequenceControlDesc.SelectedLayoutMode = input_args->SequenceControlDesc.SelectedLayoutMode;
+
+    input_args_static.SequenceControlDesc.FrameSubregionsLayoutData.DataSize = input_args->SequenceControlDesc.FrameSubregionsLayoutData.DataSize;
+    if (input_args->SequenceControlDesc.FrameSubregionsLayoutData.DataSize > 0)
+        memcpy(&input_args_static.SequenceControlDesc.FrameSubregionsLayoutData.TilesPartition_AV1,
+               input_args->SequenceControlDesc.FrameSubregionsLayoutData.pTilesPartition_AV1,
+               input_args->SequenceControlDesc.FrameSubregionsLayoutData.DataSize);
+
+    input_args_static.SequenceControlDesc.CodecGopSequence.DataSize = input_args->SequenceControlDesc.CodecGopSequence.DataSize;
+    if (input_args->SequenceControlDesc.CodecGopSequence.DataSize > 0)
+        memcpy(&input_args_static.SequenceControlDesc.CodecGopSequence.AV1SequenceStructure,
+               input_args->SequenceControlDesc.CodecGopSequence.pAV1SequenceStructure,
+               input_args->SequenceControlDesc.CodecGopSequence.DataSize);
+
+    input_args_static.PictureControlDesc.IntraRefreshFrameIndex = input_args->PictureControlDesc.IntraRefreshFrameIndex;
+    input_args_static.PictureControlDesc.Flags = input_args->PictureControlDesc.Flags;
+
+    input_args_static.PictureControlDesc.PictureControlCodecData.DataSize = input_args->PictureControlDesc.PictureControlCodecData.DataSize;
+    if (input_args->PictureControlDesc.PictureControlCodecData.DataSize > 0)
+        memcpy(&input_args_static.PictureControlDesc.PictureControlCodecData.AV1PicData,
+               input_args->PictureControlDesc.PictureControlCodecData.pAV1PicData,
+               input_args->PictureControlDesc.PictureControlCodecData.DataSize);
+
+    input_args_static.PictureControlDesc.ReferenceFrames.NumTexture2Ds = input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds;
+    input_args_static.PictureControlDesc.ReferenceFrames.ppTexture2Ds = input_args->PictureControlDesc.ReferenceFrames.ppTexture2Ds;
+    if (input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds > 0 &&
+        input_args->PictureControlDesc.ReferenceFrames.pSubresources)
+        input_args_static.PictureControlDesc.ReferenceFrames.pSubresources[0] = input_args->PictureControlDesc.ReferenceFrames.pSubresources[0];
+
+    input_args_static.pInputFrame = input_args->pInputFrame;
+    input_args_static.InputFrameSubresource = input_args->InputFrameSubresource;
+    input_args_static.CurrentFrameBitstreamMetadataSize = input_args->CurrentFrameBitstreamMetadataSize;
+    //-end of copy input_args to input_args_static.
+
+    //+start of copy input_metadata to input_metadata_static.
+    D3D12_VIDEO_ENCODER_RESOLVE_METADATA_INPUT_ARGUMENTS_STATIC input_metadata_static = {0};
+    input_metadata_static.EncoderCodec = input_metadata->EncoderCodec;
+
+    input_metadata_static.EncoderProfile.DataSize = input_metadata->EncoderProfile.DataSize;
+    if (input_metadata->EncoderProfile.DataSize > 0)
+        memcpy(&input_metadata_static.EncoderProfile.AV1Profile,
+               input_metadata->EncoderProfile.pAV1Profile,
+               input_metadata->EncoderProfile.DataSize);
+
+    input_metadata_static.EncoderInputFormat = input_metadata->EncoderInputFormat;
+    input_metadata_static.EncodedPictureEffectiveResolution = input_metadata->EncodedPictureEffectiveResolution;
+    input_metadata_static.HWLayoutMetadata = input_metadata->HWLayoutMetadata;
+    //-end of copy input_metadata to input_metadata_static.
 
     if (qp_map && qp_map_size > 0)
-        num_buffers = 5;
+        num_buffers++;
+    if (frame_data && frame_data_size > 0)
+        num_buffers++;
 
-    frame_data_size = sizeof(DXFrameHeader)
-        + sizeof(DXBufferHeader) + sizeof(*input_args)
+    ivf_frame_size = sizeof(DXFrameHeader)
+        + sizeof(DXBufferHeader) + sizeof(input_args_static)
         + sizeof(DXBufferHeader) + sizeof(*output_args)
-        + sizeof(DXBufferHeader) + sizeof(*input_metadata)
+        + sizeof(DXBufferHeader) + sizeof(input_metadata_static)
         + sizeof(DXBufferHeader) + sizeof(*output_metadata);
 
     if (qp_map && qp_map_size > 0)
-        frame_data_size += sizeof(DXBufferHeader) + qp_map_size;
+        ivf_frame_size += sizeof(DXBufferHeader) + qp_map_size;
+    if (frame_data && frame_data_size > 0)
+        ivf_frame_size += sizeof(DXBufferHeader) + (uint32_t)frame_data_size;
 
     // IVF frame header (12 bytes packed: uint32 size + int64 timestamp)
-    fwrite(&frame_data_size, sizeof(uint32_t), 1, f);
+    fwrite(&ivf_frame_size, sizeof(uint32_t), 1, f);
     {
         int64_t timestamp = ctx->dx_frame_count;
         fwrite(&timestamp, sizeof(int64_t), 1, f);
@@ -427,11 +717,11 @@ static void d3d12va_dx_bitstream_write_frame(
 
     // DX buffers
     d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_ENCODEFRAME_INPUT,
-                                      input_args, sizeof(*input_args));
+                                      &input_args_static, sizeof(input_args_static));
     d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_ENCODEFRAME_OUTPUT,
                                       output_args, sizeof(*output_args));
     d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_RESOLVE_METADATA_INPUT,
-                                      input_metadata, sizeof(*input_metadata));
+                                      &input_metadata_static, sizeof(input_metadata_static));
     d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_RESOLVE_METADATA_OUTPUT,
                                       output_metadata, sizeof(*output_metadata));
 
@@ -439,11 +729,15 @@ static void d3d12va_dx_bitstream_write_frame(
         d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_QP_MAP,
                                           qp_map, qp_map_size);
 
+    if (frame_data && frame_data_size > 0)
+        d3d12va_dx_bitstream_write_buffer(f, DX_BUFFER_TYPE_INPUT_FRAME_DATA,
+                                          frame_data, (int32_t)frame_data_size);
+
     fflush(f);
     ctx->dx_frame_count++;
 
     av_log(avctx, AV_LOG_DEBUG, "DX bitstream: wrote frame %u (%u buffers, %u bytes)\n",
-           ctx->dx_frame_count - 1, num_buffers, frame_data_size);
+           ctx->dx_frame_count - 1, num_buffers, ivf_frame_size);
 }
 
 static int d3d12va_encode_issue(AVCodecContext *avctx,
@@ -762,10 +1056,19 @@ static int d3d12va_encode_issue(AVCodecContext *avctx,
     ID3D12VideoEncodeCommandList2_ResolveEncoderOutputMetadata(cmd_list, &input_metadata, &output_metadata);
 
     // Write DX bitstream frame data
-    if (ctx->dx_bitstream_file)
+    if (ctx->dx_bitstream_file) {
+        uint8_t *input_frame_data = NULL;
+        size_t input_frame_data_size = 0;
+
+        d3d12va_dx_read_input_frame(avctx, pic->input_surface,
+                                    &input_frame_data, &input_frame_data_size);
+
         d3d12va_dx_bitstream_write_frame(avctx, &input_args, &output_args,
                                          &input_metadata, &output_metadata,
-                                         pic->qp_map, pic->qp_map_size);
+                                         pic->qp_map, pic->qp_map_size,
+                                         input_frame_data, input_frame_data_size);
+        av_freep(&input_frame_data);
+    }
 
     if (barriers_ref_index > 0) {
         for (i = 0; i < barriers_ref_index; i++)
@@ -1609,9 +1912,6 @@ static int d3d12va_create_encoder(AVCodecContext *avctx)
         return AVERROR(EINVAL);
     }
 
-    if (ctx->dx_bitstream_file)
-        d3d12va_dx_bitstream_write_ivf_header(avctx);
-
     return 0;
 }
 
@@ -2003,6 +2303,44 @@ int ff_d3d12va_encode_init(AVCodecContext *avctx)
     err = d3d12va_create_encoder_heap(avctx);
     if (err < 0)
         goto fail;
+
+    if (ctx->dx_bitstream_file) {
+        AVD3D12VAFramesContext *frames_hwctx = base_ctx->input_frames->hwctx;
+
+        D3D12_VIDEO_ENCODER_DESC_STATIC enc_desc_static = {
+            .NodeMask                     = 0,
+            .Flags                        = D3D12_VIDEO_ENCODER_FLAG_NONE,
+            .EncodeCodec                  = ctx->codec->d3d12_codec,
+            // .EncodeProfile                = ctx->profile->d3d12_profile,
+            .InputFormat                  = frames_hwctx->format,
+            // .CodecConfiguration           = ctx->codec_conf,
+            .MaxMotionEstimationPrecision = ctx->me_precision,
+        };
+        enc_desc_static.EncodeProfile.DataSize = ctx->profile->d3d12_profile.DataSize;
+        memcpy(&enc_desc_static.EncodeProfile.AV1Profile, ctx->profile->d3d12_profile.pAV1Profile, ctx->profile->d3d12_profile.DataSize);
+        enc_desc_static.CodecConfiguration.DataSize = ctx->codec_conf.DataSize;
+        memcpy(&enc_desc_static.CodecConfiguration.AV1Config, ctx->codec_conf.pAV1Config, ctx->codec_conf.DataSize);
+
+        D3D12_VIDEO_ENCODER_HEAP_DESC_STATIC heap_desc_static = {
+            .NodeMask             = 0,
+            .Flags                = D3D12_VIDEO_ENCODER_HEAP_FLAG_NONE,
+            .EncodeCodec          = ctx->codec->d3d12_codec,
+            // .EncodeProfile        = ctx->profile->d3d12_profile,
+            // .EncodeLevel          = ctx->level,
+            .ResolutionsListCount = 1,
+            // .pResolutionList      = &ctx->resolution,
+        };
+        heap_desc_static.EncodeProfile.DataSize = ctx->profile->d3d12_profile.DataSize;
+        memcpy(&heap_desc_static.EncodeProfile.AV1Profile, ctx->profile->d3d12_profile.pAV1Profile, ctx->profile->d3d12_profile.DataSize);
+
+        heap_desc_static.EncodeLevel.DataSize = ctx->level.DataSize;
+        memcpy(&heap_desc_static.EncodeLevel.AV1LevelSetting, ctx->level.pAV1LevelSetting, ctx->level.DataSize);
+
+        memcpy(&heap_desc_static.pResolutionList[0], &ctx->resolution, sizeof(ctx->resolution));
+
+
+        d3d12va_dx_bitstream_write_ivf_header(avctx, &enc_desc_static, &heap_desc_static);
+    }
 
     base_ctx->async_encode = 1;
     base_ctx->encode_fifo = av_fifo_alloc2(base_ctx->async_depth,
