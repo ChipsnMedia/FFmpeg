@@ -697,10 +697,16 @@ static void d3d12va_dx_bitstream_write_frame(
                input_args->PictureControlDesc.PictureControlCodecData.DataSize);
 
     input_args_static.PictureControlDesc.ReferenceFrames.NumTexture2Ds = input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds;
-    input_args_static.PictureControlDesc.ReferenceFrames.ppTexture2Ds = input_args->PictureControlDesc.ReferenceFrames.ppTexture2Ds;
+    if (input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds > 0 &&
+        input_args->PictureControlDesc.ReferenceFrames.ppTexture2Ds)
+        memcpy(&input_args_static.PictureControlDesc.ReferenceFrames.pTexture2Ds[0],
+               input_args->PictureControlDesc.ReferenceFrames.ppTexture2Ds,
+               sizeof(ID3D12Resource *)*input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds);
     if (input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds > 0 &&
         input_args->PictureControlDesc.ReferenceFrames.pSubresources)
-        input_args_static.PictureControlDesc.ReferenceFrames.pSubresources[0] = input_args->PictureControlDesc.ReferenceFrames.pSubresources[0];
+        memcpy(&input_args_static.PictureControlDesc.ReferenceFrames.pSubresources,
+               input_args->PictureControlDesc.ReferenceFrames.pSubresources,
+               sizeof(UINT)*input_args->PictureControlDesc.ReferenceFrames.NumTexture2Ds);
 
     input_args_static.pInputFrame = input_args->pInputFrame;
     input_args_static.InputFrameSubresource = input_args->InputFrameSubresource;

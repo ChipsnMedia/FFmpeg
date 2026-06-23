@@ -312,9 +312,10 @@ typedef struct D3D12_VIDEO_ENCODER_PICTURE_CONTROL_CODEC_DATA_STATIC
 typedef struct D3D12_VIDEO_ENCODE_REFERENCE_FRAMES_STATIC
     {
     UINT NumTexture2Ds;
-    _Field_size_full_(NumTexture2Ds)  ID3D12Resource **ppTexture2Ds;
+    // _Field_size_full_(NumTexture2Ds)  ID3D12Resource **ppTexture2Ds;
+    ID3D12Resource *pTexture2Ds[8]; // assume that the maximim value of NumTexture2Ds is 8.
     // _Field_size_full_(NumTexture2Ds)  UINT *pSubresources;
-    _Field_size_full_(NumTexture2Ds)  UINT pSubresources[1]; // assume that NumTexture2Ds is always 1.
+    UINT pSubresources[8]; // assume that the maximim value of NumTexture2Ds is 8.
     } 	D3D12_VIDEO_ENCODE_REFERENCE_FRAMES_STATIC;
 
 typedef struct D3D12_VIDEO_ENCODER_PICTURE_CONTROL_DESC_STATIC
