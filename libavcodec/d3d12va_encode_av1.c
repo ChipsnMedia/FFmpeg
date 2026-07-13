@@ -515,7 +515,8 @@ static int d3d12va_hw_base_encode_init_params_av1(FFHWBaseEncodeContext *base_ct
     }
 
     // Still picture mode
-    seq->still_picture = (base_ctx->gop_size == 1);
+    // seq->still_picture = (base_ctx->gop_size == 1);
+    seq->still_picture = 0; // although gop_size is 1. not to set still_picture mode because chipsnmedia d3d12va encoder does not support screen content tool.
     seq->reduced_still_picture_header = seq->still_picture;
 
     // Feature flags
