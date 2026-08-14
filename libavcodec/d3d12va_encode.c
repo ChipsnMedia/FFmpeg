@@ -389,6 +389,9 @@ static void d3d12va_dx_bitstream_write_ivf_header(AVCodecContext *avctx,
         .level_profile_tier = (d3d12va_dx_get_tier_value(ctx) << 24) | (d3d12va_dx_get_profile_value(ctx) << 16) | d3d12va_dx_get_level_value(ctx),
         .frame_count  = 0,
         .input_format = frames_hwctx->format,
+        .linesize     = FFALIGN(base_ctx->input_frames->width *
+                                (frames_hwctx->format == DXGI_FORMAT_P010 ? 2 : 1),
+                                D3D12_TEXTURE_DATA_PITCH_ALIGNMENT),
     };
     fwrite(&hdr, sizeof(hdr), 1, ctx->dx_bitstream_file);
 

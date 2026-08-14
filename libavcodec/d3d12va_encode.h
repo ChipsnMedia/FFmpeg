@@ -125,6 +125,7 @@ typedef struct DXIvfHeader {
     uint32_t level_profile_tier;  // D3D12 encoder level value at low 16bit, profile value at 16-24bit, tier value at 24-32bit
     uint32_t frame_count;
     uint32_t input_format;    // DXGI_FORMAT
+    uint32_t linesize;        // row pitch in bytes (D3D12_TEXTURE_DATA_PITCH_ALIGNMENT aligned)
 } DXIvfHeader;
 
 #pragma pack(push, 1)
@@ -153,6 +154,7 @@ enum DXBufferType {
     DX_BUFFER_TYPE_RESOLVE_METADATA_OUTPUT = 3,
     DX_BUFFER_TYPE_QP_MAP                  = 4,
     DX_BUFFER_TYPE_INPUT_FRAME_DATA        = 5,
+    DX_BUFFER_TYPE_OUTPUT_BUFFER_DATA      = 6,
 };
 
 typedef struct D3D12_VIDEO_ENCODER_PROFILE_DESC_STATIC
